@@ -1,11 +1,14 @@
 # arm64 Linux environment for building and testing Mead.
-# The Android NDK builds the conformance and loader test fixtures (ELF
-# aarch64 .so files); sdkmanager checks the NDK's checksums itself, so no
-# checksum is pinned here. binutils' readelf and nm back mead --report.
+# The NDK's own tools are x86_64 binaries and cannot run on arm64, so
+# fixtures are cross-built with Debian's clang and lld against the NDK's
+# sysroot, which is host-independent; sdkmanager checks the NDK's checksums
+# itself, so no checksum is pinned here. binutils' readelf and nm back
+# mead --report.
 FROM swift:6.4-trixie
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
+        clang-19 lld-19 \
         openjdk-21-jre-headless unzip binutils curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
