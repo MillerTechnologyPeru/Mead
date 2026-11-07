@@ -10,4 +10,4 @@ docker build --platform linux/arm64 -t "$image" .
 exec docker run --rm --platform linux/arm64 \
     -v "$PWD:/mead" \
     "$image" \
-    sh -c 'swift build --scratch-path .build/linux && swift test --scratch-path .build/linux "$@"' sh "$@"
+    sh -c 'cd /mead && swift build --scratch-path .build/linux && swift test --scratch-path .build/linux "$@"' sh "$@"
