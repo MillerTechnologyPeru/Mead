@@ -5,6 +5,8 @@
 // (comma-separated: load, bind, init, or all); mead_fatal always prints and
 // exits, as the loader never recovers from what it reports.
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
