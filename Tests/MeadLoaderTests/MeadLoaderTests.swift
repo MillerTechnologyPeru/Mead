@@ -1,3 +1,6 @@
+#if canImport(Glibc)
+import Glibc
+#endif
 import MeadInterface
 import MeadLoaderCore
 import Testing
