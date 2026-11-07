@@ -79,31 +79,35 @@ size_t mead_fixups_missing_count(const char *name) {
 // ABI's "nothing came of it".
 static long mead_stub_called(const char *name);
 
-// The stub an unresolved import binds to. Each missing name gets a small
-// thunk — x16 and x17 are the intra-procedure scratch registers, free at a
-// function's entry — that hands the name to mead_stub_called, which reports
-// it, then returns 0 under MEAD_UNIMPLEMENTED or aborts, naming it.
-static void *mead_stub_for(const char *name) {
+// The stub an unresolved import binds to. Each missing name gets one small
+// thunk, made once and shared by every place that wants it — a library can
+// import the same missing thing a thousand times — loading it with the name
+// on x17 and the callee on x16, the intra-procedure scratch registers, free
+// at a function's entry. mead_stub_called reports the name, then returns 0
+// under MEAD_UNIMPLEMENTED or aborts, naming it.
+struct stub_entry {
+    const char *name;
+    void *thunk;
+};
+static struct stub_entry *stub_entries;
+static size_t stub_count, stub_space;
+
+// One thunk in the arena, or NULL when there is no room. Unlocked; callers
+// hold the lock.
+static void *make_thunk(const char *name) {
     // ldr x17, [pc, #16]; ldr x16, [pc, #20]; br x16; nop; .quad name;
     // .quad mead_stub_called. 32 bytes.
-    enum { THUNK_SIZE = 32, ARENA_SIZE = 64 * 1024 };
-    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    enum { THUNK_SIZE = 32, ARENA_SIZE = 1024 * 1024 };
     static uint8_t *arena;
     static size_t used;
-    pthread_mutex_lock(&lock);
     if (!arena) {
         arena = mmap(NULL, ARENA_SIZE, PROT_READ | PROT_WRITE | PROT_EXEC,
                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-        if (arena == MAP_FAILED) {
+        if (arena == MAP_FAILED)
             arena = NULL;
-            pthread_mutex_unlock(&lock);
-            return NULL;
-        }
     }
-    if (used + THUNK_SIZE > ARENA_SIZE) {
-        pthread_mutex_unlock(&lock);
+    if (!arena || used + THUNK_SIZE > ARENA_SIZE)
         return NULL;
-    }
     uint32_t *code = (uint32_t *)(arena + used);
     code[0] = 0x58000000u | (4u << 5) | 17; // ldr x17, [pc, #16]
     code[1] = 0x58000000u | (5u << 5) | 16; // ldr x16, [pc, #20]
@@ -114,8 +118,42 @@ static void *mead_stub_for(const char *name) {
     memcpy(code + 4, &name_address, sizeof(name_address));
     memcpy(code + 6, &called, sizeof(called));
     used += THUNK_SIZE;
-    pthread_mutex_unlock(&lock);
     return code;
+}
+
+static void *mead_stub_for(const char *name) {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static void *unnamed;
+    pthread_mutex_lock(&lock);
+    for (size_t index = 0; index < stub_count; index++)
+        if (strcmp(stub_entries[index].name, name) == 0) {
+            pthread_mutex_unlock(&lock);
+            return stub_entries[index].thunk;
+        }
+    if (stub_count == stub_space) {
+        size_t space = stub_space ? stub_space * 2 : 64;
+        struct stub_entry *grown = realloc(stub_entries, space * sizeof(*grown));
+        if (!grown) {
+            pthread_mutex_unlock(&lock);
+            return NULL;
+        }
+        stub_entries = grown;
+        stub_space = space;
+    }
+    if (!unnamed)
+        unnamed = make_thunk("an unresolved function"); // made before any pressure
+    void *thunk = make_thunk(name);
+    if (!thunk) {
+        // Out of room for a name of its own: the shared one, which says
+        // only "an unresolved function", rather than nothing at all.
+        pthread_mutex_unlock(&lock);
+        return unnamed;
+    }
+    stub_entries[stub_count].name = name;
+    stub_entries[stub_count].thunk = thunk;
+    stub_count++;
+    pthread_mutex_unlock(&lock);
+    return thunk;
 }
 
 static long mead_stub_called(const char *name) {
