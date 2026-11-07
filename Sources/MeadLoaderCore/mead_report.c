@@ -1,0 +1,169 @@
+#define _GNU_SOURCE
+#include "mead_deps.h"
+#include "mead_fixups.h"
+#include "mead_image.h"
+#include "mead_loader.h"
+#include "mead_symbols.h"
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// mead --report: load and bind without running anything, then say what a
+// library is made of — its images, what each needs, the relocations in it,
+// the JNI class names among its strings, and the imports nothing answered.
+
+static const char *relocation_name(uint32_t type) {
+    switch (type) {
+    case R_AARCH64_ABS64: return "ABS64";
+    case R_AARCH64_GLOB_DAT: return "GLOB_DAT";
+    case R_AARCH64_JUMP_SLOT: return "JUMP_SLOT";
+    case R_AARCH64_RELATIVE: return "RELATIVE";
+    case R_AARCH64_TLS_DTPMOD64: return "TLS_DTPMOD64";
+    case R_AARCH64_TLS_DTPREL64: return "TLS_DTPREL64";
+    case R_AARCH64_TLS_TPREL64: return "TLS_TPREL64";
+    case R_AARCH64_TLSDESC: return "TLSDESC";
+    case R_AARCH64_IRELATIVE: return "IRELATIVE";
+    default: return NULL;
+    }
+}
+
+// Counts the relocation kinds an image carries, by walking its tables the
+// way mead_fixups does.
+static void count_relocations(const mead_image *image, size_t counts[10]) {
+    enum { ABS, GLOB, JUMP, RELATIVE, DTPMOD, DTPREL, TPREL, TLSDESC, IREL, OTHER };
+    const Elf64_Dyn *table = mead_image_dynamic(image, DT_RELA);
+    const Elf64_Dyn *size = mead_image_dynamic(image, DT_RELASZ);
+    const Elf64_Rela *entries = table ? mead_image_address(image, (uint64_t)table->d_un.d_ptr) : NULL;
+    size_t at = table && size ? (size_t)size->d_un.d_val / sizeof(*entries) : 0;
+    for (size_t index = 0; index < at; index++) {
+        switch ((uint32_t)ELF64_R_TYPE(entries[index].r_info)) {
+        case R_AARCH64_ABS64: counts[ABS]++; break;
+        case R_AARCH64_GLOB_DAT: counts[GLOB]++; break;
+        case R_AARCH64_JUMP_SLOT: counts[JUMP]++; break;
+        case R_AARCH64_RELATIVE: counts[RELATIVE]++; break;
+        case R_AARCH64_TLS_DTPMOD64: counts[DTPMOD]++; break;
+        case R_AARCH64_TLS_DTPREL64: counts[DTPREL]++; break;
+        case R_AARCH64_TLS_TPREL64: counts[TPREL]++; break;
+        case R_AARCH64_TLSDESC: counts[TLSDESC]++; break;
+        case R_AARCH64_IRELATIVE: counts[IREL]++; break;
+        default: counts[OTHER]++; break;
+        }
+    }
+}
+
+// Whether a run of bytes looks like a Java class or method name: letters,
+// digits, dots, slashes, dollars, semicolons and parentheses, with a slash
+// in it (java/lang/String, Lcom/mojang/minecraftpe/MainActivity;,
+// (Ljava/lang/String;)V's shape shows in longer runs).
+static bool class_like(const char *string, size_t length) {
+    bool slash = false;
+    for (size_t index = 0; index < length; index++) {
+        char at = string[index];
+        if (at == '/' || at == '.')
+            slash = true;
+        else if (!isalnum((unsigned char)at) && strchr("_$;()[]<>", at) == NULL)
+            return false;
+    }
+    return slash;
+}
+
+// Prints the JNI class-name candidates in an image's read-only bytes,
+// deduplicated, newest first capped: what FindClass and GetMethodID are
+// handed, as strings between the code.
+static void report_jni_classes(const mead_image *image) {
+    printf("  jni classes (candidates):\n");
+    enum { MAX = 512 };
+    static char seen[MAX][192];
+    size_t seen_count = 0;
+    for (uint16_t segment = 0; segment < image->phnum && seen_count < MAX; segment++) {
+        const Elf64_Phdr *at = (const Elf64_Phdr *)
+            ((const char *)image->phdr + (size_t)segment * image->phentsize);
+        if (at->p_type != PT_LOAD || !(at->p_flags & PF_X))
+            continue;
+        const char *bytes = mead_image_address(image, at->p_vaddr);
+        size_t length = (size_t)at->p_filesz;
+        size_t run = 0;
+        for (size_t index = 0; index <= length && seen_count < MAX; index++) {
+            char character = index < length ? bytes[index] : 0;
+            if (character && !iscntrl((unsigned char)character) && character != ' ') {
+                run++;
+                continue;
+            }
+            if (run >= 8 && run < sizeof(seen[0])) {
+                char candidate[sizeof(seen[0])];
+                memcpy(candidate, bytes + index - run, run);
+                candidate[run] = 0;
+                if (class_like(candidate, run)) {
+                    bool duplicate = false;
+                    for (size_t which = 0; which < seen_count; which++)
+                        if (strcmp(seen[which], candidate) == 0)
+                            duplicate = true;
+                    if (!duplicate) {
+                        snprintf(seen[seen_count++], sizeof(seen[0]), "%s", candidate);
+                        printf("    %s\n", candidate);
+                    }
+                }
+            }
+            run = 0;
+        }
+    }
+}
+
+int mead_report(const char *path) {
+    char *error = NULL;
+    mead_image *image = mead_deps_add(path, &error);
+    if (!image) {
+        fprintf(stderr, "mead: cannot load: %s\n", error ? error : "out of memory");
+        free(error);
+        return 1;
+    }
+    mead_tlv_layout();
+    size_t count = 0;
+    mead_image *const *images = mead_deps_images(&count);
+    for (size_t index = 0; index < count; index++)
+        mead_fixups_apply(images[index]);
+
+    printf("%s\n", path);
+    for (size_t index = 0; index < count; index++) {
+        const mead_image *at = images[index];
+        printf("  image %s (%s, align %lu)\n", at->path, at->soname ? at->soname : "no soname",
+               (unsigned long)at->alignment);
+        size_t symbols = 0;
+        const Elf64_Sym *table = mead_symbols_table(at, &symbols);
+        size_t imports = 0;
+        for (size_t which = 1; which < symbols; which++)
+            if (table[which].st_shndx == SHN_UNDEF && table[which].st_name != 0 &&
+                ELF64_ST_BIND(table[which].st_info) != STB_WEAK)
+                imports++;
+        printf("    %zu symbols, %zu imports, %zu needed\n", symbols, imports, at->needed_count);
+        for (size_t needed = 0; needed < at->needed_count; needed++)
+            printf("      needs %s\n", at->needed[needed]->soname ? at->needed[needed]->soname
+                                                                  : at->needed[needed]->path);
+        size_t counts[10] = { 0 };
+        count_relocations(at, counts);
+        static const char *names[10] = { "ABS64",     "GLOB_DAT",  "JUMP_SLOT", "RELATIVE",
+                                         "DTPMOD64",  "DTPREL64",  "TPREL64",   "TLSDESC",
+                                         "IRELATIVE", "other" };
+        printf("    relocations:");
+        for (int which = 0; which < 10; which++)
+            if (counts[which])
+                printf(" %s=%zu", names[which], counts[which]);
+        printf("\n");
+        (void)relocation_name;
+    }
+    report_jni_classes(image);
+
+    size_t missing = 0;
+    const char *const *missing_names = mead_fixups_missing(&missing);
+    if (missing) {
+        printf("  missing (%zu):\n", missing);
+        for (size_t index = 0; index < missing; index++)
+            printf("    %s (wanted %zu times)\n", missing_names[index],
+                   mead_fixups_missing_count(missing_names[index]));
+        return 1;
+    }
+    printf("  nothing missing\n");
+    return 0;
+}
