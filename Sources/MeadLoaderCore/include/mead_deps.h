@@ -52,4 +52,8 @@ const char *mead_deps_provider_for(const char *soname);
 // table order. NULL if missing.
 void *mead_deps_provider_symbol(const char *name);
 
+// The providers loaded so far, with their files, for the loader to call
+// their startup and image hooks (mead_interface.h).
+void mead_deps_providers(void ***handles, const char ***files, size_t *count);
+
 #endif
