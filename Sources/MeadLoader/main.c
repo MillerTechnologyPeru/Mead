@@ -6,9 +6,11 @@
 #include "mead_loader.h"
 #include "mead_log.h"
 
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static void usage(FILE *out) {
     fputs("usage: mead [options] <library.so | game directory> [arguments...]\n"
@@ -28,8 +30,39 @@ static void usage(FILE *out) {
           "                      is a library rather than a directory\n"
           "\n"
           "A game directory is one extracted from its APK: lib/arm64-v8a/*.so\n"
-          "and assets/, as mcpelauncher keeps them.\n",
+          "and assets/, as mcpelauncher keeps them; the largest library there\n"
+          "is the game's.\n",
           out);
+}
+
+// The game's library in a directory extracted from an APK: the largest .so
+// in lib/arm64-v8a, which for every game checked so far is the game's own.
+static char *library_in(const char *directory) {
+    char libraries[4096];
+    snprintf(libraries, sizeof(libraries), "%s/lib/arm64-v8a", directory);
+    DIR *open = opendir(libraries);
+    if (!open)
+        return NULL;
+    char *best = NULL;
+    long best_size = 0;
+    struct dirent *entry;
+    while ((entry = readdir(open))) {
+        size_t length = strlen(entry->d_name);
+        if (length < 4 || strcmp(entry->d_name + length - 3, ".so") != 0)
+            continue;
+        char *path = NULL;
+        if (asprintf(&path, "%s/%s", libraries, entry->d_name) < 0)
+            continue;
+        struct stat status;
+        if (stat(path, &status) == 0 && status.st_size > best_size) {
+            free(best);
+            best = path;
+            best_size = status.st_size;
+        } else
+            free(path);
+    }
+    closedir(open);
+    return best;
 }
 
 int main(int argc, char **argv) {
@@ -50,5 +83,31 @@ int main(int argc, char **argv) {
         usage(stderr);
         return 1;
     }
-    mead_fatal("loading comes with the loader; only usage is here so far%s", report ? " (report too)" : "");
+
+    char *target = argv[first];
+    struct stat status;
+    if (stat(target, &status) == 0 && S_ISDIR(status.st_mode)) {
+        char *inside = library_in(target);
+        if (!inside) {
+            fprintf(stderr, "mead: no lib/arm64-v8a/*.so in %s\n", target);
+            return 1;
+        }
+        if (!getenv("MEAD_DATA_DIR"))
+            setenv("MEAD_DATA_DIR", target, 0);
+        target = inside;
+        mead_trace("load", "the game's library in the directory is %s", target);
+    }
+
+    if (report)
+        return mead_report(target);
+
+    char *error = NULL;
+    void *image = mead_load_library(target, &error);
+    if (!image) {
+        fprintf(stderr, "mead: %s\n", error ? error : "out of memory");
+        free(error);
+        return 1;
+    }
+    mead_trace("load", "loaded; the game's initializers have run");
+    return 0;
 }
