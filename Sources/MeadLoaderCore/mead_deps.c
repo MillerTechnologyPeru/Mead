@@ -113,6 +113,25 @@ void *mead_deps_provider_symbol(const char *name) {
     return NULL;
 }
 
+void mead_deps_providers(void ***handles, const char ***files, size_t *count) {
+    // The provider table, opened or not; callers skip what they are not
+    // given (a NULL handle is a provider that has not been needed yet).
+    static void *handles_storage[sizeof(providers) / sizeof(providers[0])];
+    static const char *files_storage[sizeof(providers) / sizeof(providers[0])];
+    pthread_mutex_lock(&lock);
+    for (size_t index = 0; index < sizeof(providers) / sizeof(providers[0]); index++) {
+        if (provider_handles)
+            handles_storage[index] = provider_handles[index];
+        else
+            handles_storage[index] = NULL;
+        files_storage[index] = providers[index].file;
+    }
+    pthread_mutex_unlock(&lock);
+    *handles = handles_storage;
+    *files = files_storage;
+    *count = sizeof(providers) / sizeof(providers[0]);
+}
+
 // The image a soname or path names, if one is already loaded.
 static mead_image *find_loaded(const char *name) {
     const char *slash = strrchr(name, '/');
