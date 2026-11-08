@@ -1,10 +1,13 @@
 #define _GNU_SOURCE
 #include "mead_deps.h"
+#include "mead_interface.h"
 #include "mead_log.h"
 #include "mead_symbols.h"
+#include "mead_tlv.h"
 
 #include <dlfcn.h>
 #include <libgen.h>
+#include <link.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,15 +39,26 @@ static const struct {
     { "libaaudio.so",     "libMeadOpenSLES.so" },
     { "libart.so",        "libMeadJNI.so" },
 };
+#define PROVIDER_COUNT (sizeof(providers) / sizeof(providers[0]))
 
 // The registry's lock is recursive: loading a dependency loads its own
 // dependencies through the same path, as DT_NEEDED is a graph.
 static pthread_mutex_t lock = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 static mead_image **images;       // every image, in load order
 static size_t image_count, image_space;
-static void **provider_handles;   // dlopen'd, one per providers[] entry
+static void *provider_handles[PROVIDER_COUNT]; // dlopen'd, one per providers[] entry
+static bool provider_tried[PROVIDER_COUNT];    // whether that dlopen has been tried
 static char provider_dir[4096];   // where the providers are
 static char *game_dir;            // the first game library's directory
+static mead_image *adding_root;   // the library the current load began with
+
+void mead_deps_lock(void) {
+    pthread_mutex_lock(&lock);
+}
+
+void mead_deps_unlock(void) {
+    pthread_mutex_unlock(&lock);
+}
 
 void mead_deps_init(void) {
     pthread_mutex_lock(&lock);
@@ -69,16 +83,12 @@ const char *mead_deps_provider_for(const char *soname) {
     return NULL;
 }
 
-// The provider at `index`'s table place, dlopen'd once. NULL when it has no
-// file or cannot be opened (reported once).
+// The provider at `index`'s table place, dlopen'd once, whether that worked
+// or not: binding asks for thousands of symbols. NULL when it cannot be
+// opened (reported once).
 static void *open_provider(size_t index) {
-    if (!provider_handles) {
-        provider_handles = calloc(sizeof(providers) / sizeof(providers[0]),
-                                  sizeof(*provider_handles));
-        if (!provider_handles)
-            return NULL;
-    }
-    if (!provider_handles[index] && providers[index].file) {
+    if (!provider_tried[index]) {
+        provider_tried[index] = true;
         char path[4096];
         snprintf(path, sizeof(path), "%s/%s", provider_dir, providers[index].file);
         provider_handles[index] = dlopen(path, RTLD_NOW | RTLD_LOCAL);
@@ -92,44 +102,87 @@ static void *open_provider(size_t index) {
 // DT_NEEDED comes here, so a system soname a game needs has its provider
 // loaded in order, before anything binds to it.
 static void *provider_for(const char *soname) {
-    for (size_t index = 0; index < sizeof(providers) / sizeof(providers[0]); index++)
+    for (size_t index = 0; index < PROVIDER_COUNT; index++)
         if (strcmp(providers[index].soname, soname) == 0)
             return open_provider(index);
     return NULL;
 }
 
+void *mead_deps_provider_handle(const char *soname) {
+    pthread_mutex_lock(&lock);
+    void *handle = provider_for(soname);
+    pthread_mutex_unlock(&lock);
+    return handle;
+}
+
+// A provider's own definition of a name. dlsym on a handle also searches
+// what the library depends on, which for every provider means the host's C
+// library: an Android caller of stat() must not end up in glibc's by way of
+// a provider that never said it could take it.
+static void *own_symbol(void *handle, const char *name) {
+    void *symbol = dlsym(handle, name);
+    if (!symbol)
+        return NULL;
+    struct link_map *provider = NULL, *definer = NULL;
+    Dl_info info;
+    if (dlinfo(handle, RTLD_DI_LINKMAP, &provider) != 0 ||
+        !dladdr1(symbol, &info, (void **)&definer, RTLD_DL_LINKMAP))
+        return NULL;
+    return provider == definer ? symbol : NULL;
+}
+
 void *mead_deps_provider_symbol(const char *name) {
     pthread_mutex_lock(&lock);
-    for (size_t index = 0; index < sizeof(providers) / sizeof(providers[0]); index++) {
-        if (!open_provider(index))
+    void *symbol = NULL;
+    void *asked = NULL; // sonames sharing a provider sit side by side
+    for (size_t index = 0; index < PROVIDER_COUNT && !symbol; index++) {
+        void *handle = open_provider(index);
+        if (!handle || handle == asked)
             continue;
-        void *symbol = dlsym(provider_handles[index], name);
-        if (symbol) {
-            pthread_mutex_unlock(&lock);
-            return symbol;
+        asked = handle;
+        symbol = own_symbol(handle, name);
+        if (!symbol) {
+            mead_provider_symbol_fn hook =
+                (mead_provider_symbol_fn)dlsym(handle, MEAD_PROVIDER_SYMBOL_SYMBOL);
+            if (hook)
+                symbol = hook(name);
         }
     }
     pthread_mutex_unlock(&lock);
-    return NULL;
+    return symbol;
 }
 
 void mead_deps_providers(void ***handles, const char ***files, size_t *count) {
-    // The provider table, opened or not; callers skip what they are not
-    // given (a NULL handle is a provider that has not been needed yet).
-    static void *handles_storage[sizeof(providers) / sizeof(providers[0])];
-    static const char *files_storage[sizeof(providers) / sizeof(providers[0])];
+    // Each provider opened so far, once: several sonames share a file, and
+    // its startup and image hooks are to run once for it.
+    static void *handles_storage[PROVIDER_COUNT];
+    static const char *files_storage[PROVIDER_COUNT];
     pthread_mutex_lock(&lock);
-    for (size_t index = 0; index < sizeof(providers) / sizeof(providers[0]); index++) {
-        if (provider_handles)
-            handles_storage[index] = provider_handles[index];
-        else
-            handles_storage[index] = NULL;
-        files_storage[index] = providers[index].file;
+    size_t unique = 0;
+    for (size_t index = 0; index < PROVIDER_COUNT; index++) {
+        if (!provider_handles[index])
+            continue;
+        bool repeated = false;
+        for (size_t earlier = 0; earlier < unique; earlier++)
+            if (handles_storage[earlier] == provider_handles[index])
+                repeated = true;
+        if (repeated)
+            continue;
+        handles_storage[unique] = provider_handles[index];
+        files_storage[unique] = providers[index].file;
+        unique++;
     }
     pthread_mutex_unlock(&lock);
     *handles = handles_storage;
     *files = files_storage;
-    *count = sizeof(providers) / sizeof(providers[0]);
+    *count = unique;
+}
+
+bool mead_deps_locate(const char *name, char *path, size_t size) {
+    pthread_mutex_lock(&lock);
+    snprintf(path, size, "%s/%s", game_dir ? game_dir : ".", name);
+    pthread_mutex_unlock(&lock);
+    return access(path, R_OK) == 0;
 }
 
 // The image a soname or path names, if one is already loaded.
@@ -175,6 +228,7 @@ mead_image *mead_deps_add(const char *path, char **error) {
         pthread_mutex_unlock(&lock);
         return NULL;
     }
+    mead_tlv_add(image);
     const Elf64_Dyn *soname = mead_image_dynamic(image, DT_SONAME);
     if (soname && image->strings)
         image->soname = strdup(image->strings + soname->d_un.d_val);
@@ -217,6 +271,10 @@ mead_image *mead_deps_add(const char *path, char **error) {
             *error = NULL;
         return NULL;
     }
+    bool outermost = !adding_root;
+    if (outermost)
+        adding_root = image;
+    image->root = adding_root;
     size_t at = 0;
     for (const Elf64_Dyn *entry = image->dynamic; entry->d_tag != DT_NULL; entry++) {
         if (entry->d_tag != DT_NEEDED)
@@ -233,11 +291,15 @@ mead_image *mead_deps_add(const char *path, char **error) {
         else
             mead_trace("load", "%s needs %s, which no file or provider answers; its symbols become stubs",
                        image->path, name);
+        if (why)
+            mead_trace("load", "%s needs %s, which cannot be loaded: %s", image->path, name, why);
         free(why);
         if (dependency)
             image->needed[at++] = dependency;
     }
     image->needed_count = at;
+    if (outermost)
+        adding_root = NULL;
 
     mead_trace("load", "loaded %s (%s)%s", image->path, image->soname ? image->soname : "no soname",
                image->needed_count ? "" : ", needing nothing");
@@ -267,58 +329,60 @@ mead_image *mead_deps_image_for(const void *address) {
     return NULL;
 }
 
-// The search breadth first from what `from` needs, then everything. The
-// two passes share the visited marks, an index into the image list.
-static const Elf64_Sym *search(const mead_image *from, const char *name, const mead_image **owner) {
+// The search: `from` itself, breadth first through what it needs, and then
+// — unless only its own tree is wanted, as for dlsym on a handle — everything
+// else in load order. An image is marked as it joins the queue, so a diamond
+// of dependencies queues it once and the queue can hold every image.
+static const Elf64_Sym *search(const mead_image *from, const char *name, const mead_image **owner,
+                               bool tree_only) {
     size_t count = image_count;
     if (count == 0)
         return NULL;
     bool *visited = calloc(count, sizeof(*visited));
-    if (!visited)
-        return NULL;
-
-    // Breadth first over what `from` needs.
     const mead_image **queue = malloc(count * sizeof(*queue));
-    if (queue) {
-        size_t head = 0, tail = 0;
-        if (from && from->order < count) {
-            visited[from->order] = true;
-            for (size_t index = 0; index < from->needed_count; index++)
-                if (!visited[from->needed[index]->order])
-                    queue[tail++] = from->needed[index];
+    const Elf64_Sym *symbol = NULL;
+    if (!visited || !queue)
+        goto done;
+
+    size_t head = 0, tail = 0;
+    if (from && from->order < count) {
+        visited[from->order] = true;
+        queue[tail++] = from;
+    }
+    while (head < tail) {
+        const mead_image *image = queue[head++];
+        const Elf64_Sym *found = mead_symbols_find(image, name);
+        if (found && found->st_shndx != SHN_UNDEF) {
+            symbol = found;
+            if (owner)
+                *owner = image;
+            goto done;
         }
-        while (head < tail) {
-            const mead_image *image = queue[head++];
-            visited[image->order] = true;
-            const Elf64_Sym *symbol = mead_symbols_find(image, name);
-            if (symbol && symbol->st_shndx != SHN_UNDEF) {
-                if (owner)
-                    *owner = image;
-                free(visited);
-                free(queue);
-                return symbol;
+        for (size_t index = 0; index < image->needed_count; index++) {
+            const mead_image *needed = image->needed[index];
+            if (!visited[needed->order]) {
+                visited[needed->order] = true;
+                queue[tail++] = needed;
             }
-            for (size_t index = 0; index < image->needed_count; index++)
-                if (!visited[image->needed[index]->order])
-                    queue[tail++] = image->needed[index];
         }
     }
-    free(queue);
 
-    // Then everything in load order.
-    for (size_t index = 0; index < count; index++) {
+    for (size_t index = 0; index < count && !tree_only; index++) {
         if (visited[index])
             continue;
-        const Elf64_Sym *symbol = mead_symbols_find(images[index], name);
-        if (symbol && symbol->st_shndx != SHN_UNDEF) {
+        const Elf64_Sym *found = mead_symbols_find(images[index], name);
+        if (found && found->st_shndx != SHN_UNDEF) {
+            symbol = found;
             if (owner)
                 *owner = images[index];
-            free(visited);
-            return symbol;
+            goto done;
         }
     }
+
+done:
     free(visited);
-    return NULL;
+    free(queue);
+    return symbol;
 }
 
 const Elf64_Sym *mead_deps_find_symbol(const mead_image *from, const char *name,
@@ -326,7 +390,17 @@ const Elf64_Sym *mead_deps_find_symbol(const mead_image *from, const char *name,
     if (owner)
         *owner = NULL;
     pthread_mutex_lock(&lock);
-    const Elf64_Sym *symbol = search(from, name, owner);
+    const Elf64_Sym *symbol = search(from, name, owner, false);
+    pthread_mutex_unlock(&lock);
+    return symbol;
+}
+
+const Elf64_Sym *mead_deps_find_in_tree(const mead_image *from, const char *name,
+                                        const mead_image **owner) {
+    if (owner)
+        *owner = NULL;
+    pthread_mutex_lock(&lock);
+    const Elf64_Sym *symbol = search(from, name, owner, true);
     pthread_mutex_unlock(&lock);
     return symbol;
 }
