@@ -6,14 +6,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-// DT_GNU_HASH's header: how many buckets, the bloom filter's shift and
-// words, and the symbol index the chain array starts at; then the bloom
-// words, the buckets and the chain.
+// DT_GNU_HASH's header: how many buckets, the symbol index the chain array
+// starts at, and the bloom filter's words and shift; then the bloom words,
+// the buckets and the chain.
 struct gnu_hash_header {
     uint32_t buckets;
-    uint32_t bloom_shift;
-    uint32_t bloom_words;
     uint32_t first_chain;
+    uint32_t bloom_words;
+    uint32_t bloom_shift;
 };
 
 static uint32_t gnu_hash_of(const char *name) {
@@ -49,14 +49,18 @@ static size_t symbol_count(const mead_image *image) {
         const uint64_t *bloom = (const uint64_t *)(header + 1);
         const uint32_t *buckets = (const uint32_t *)(bloom + header->bloom_words);
         const uint32_t *chain = buckets + header->buckets;
-        uint32_t highest = header->first_chain;
+        uint32_t highest = 0;
         for (uint32_t index = 0; index < header->buckets; index++)
             if (buckets[index] > highest)
                 highest = buckets[index];
-        uint32_t word = highest - header->first_chain;
-        while (!(chain[word] & 1))
-            word++; // the chain ends where a word has its low bit set
-        by_hash = (size_t)(header->first_chain + word + 1);
+        if (highest == 0) {
+            by_hash = header->first_chain; // it exports nothing: no chain to walk
+        } else {
+            uint32_t word = highest - header->first_chain;
+            while (!(chain[word] & 1))
+                word++; // the chain ends where a word has its low bit set
+            by_hash = (size_t)(header->first_chain + word + 1);
+        }
     } else if (image->hash) {
         by_hash = image->hash[1]; // nchain
     }
