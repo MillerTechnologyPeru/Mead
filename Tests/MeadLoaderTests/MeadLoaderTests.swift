@@ -10,7 +10,7 @@ import Testing
 // so they run one at a time.
 
 @Test func startupInfoVersionIsCurrent() {
-    #expect(MEAD_STARTUP_INFO_VERSION == 1)
+    #expect(MEAD_STARTUP_INFO_VERSION == 2)
 }
 
 @Test func traceAlwaysWantsAll() {
