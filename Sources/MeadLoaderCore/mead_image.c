@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "mead_image.h"
 #include "mead_log.h"
+#include "mead_tlv.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -201,6 +202,8 @@ void *mead_image_symbol_address(const mead_image *image, const Elf64_Sym *symbol
         return NULL;
     if (symbol->st_shndx == SHN_ABS)
         return (void *)(uintptr_t)symbol->st_value;
+    if (ELF64_ST_TYPE(symbol->st_info) == STT_TLS)
+        return (char *)mead_tlv_block(image) + symbol->st_value;
     return mead_image_address(image, symbol->st_value);
 }
 
@@ -220,8 +223,8 @@ void mead_image_protect(mead_image *image) {
             prot = PROT_READ;
         uint64_t from = segment->p_vaddr & ~((uint64_t)page - 1);
         uint64_t to = (segment->p_vaddr + segment->p_memsz + (uint64_t)page - 1) & ~((uint64_t)page - 1);
-        if (to > from)
-            mprotect(mead_image_address(image, from), (size_t)(to - from), prot);
+        if (to > from && mprotect(mead_image_address(image, from), (size_t)(to - from), prot) != 0)
+            mead_fatal("cannot protect a segment of %s: %s", image->path, strerror(errno));
     }
     image->hardened = true;
 }
