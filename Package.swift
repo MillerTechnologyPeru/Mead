@@ -1,4 +1,5 @@
 // swift-tools-version: 6.4
+import CompilerPluginSupport
 import PackageDescription
 
 let package = Package(
@@ -8,6 +9,11 @@ let package = Package(
         .executable(name: "mead", targets: ["MeadLoader"]),
         // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
         .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
+        // The fake JVM: stands in for libart.so.
+        .library(name: "MeadJNI", type: .dynamic, targets: ["MeadJNI"]),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
     ],
     targets: [
         // Interface between the loader and the provider libraries that
@@ -31,6 +37,30 @@ let package = Package(
         .target(
             name: "MeadBionic",
             dependencies: ["CMeadBionic", "MeadInterface"]
+        ),
+        // The JNI function tables and variadics.
+        .target(
+            name: "CMeadJNI"
+        ),
+        // `@JavaClass` and its members, as compiler plugin.
+        .macro(
+            name: "MeadMacros",
+            dependencies: [
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+            ]
+        ),
+        // The runtime: handles, the class registry, threads and tracing. JNI
+        // says who may touch what when, rather than Swift's concurrency.
+        .target(
+            name: "MeadJNI",
+            dependencies: ["CMeadJNI", "MeadInterface", "MeadMacros"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "MeadJNITests",
+            dependencies: ["MeadJNI"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
             name: "MeadLoaderTests",
