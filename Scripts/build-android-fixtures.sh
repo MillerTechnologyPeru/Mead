@@ -57,6 +57,11 @@ cp $toolchain/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so $out/
 # fortify as NDK apps are, and C++ exceptions across two libraries.
 $common -O2 -D_FORTIFY_SOURCE=2 -shared -Wl,-soname,libfixture_bionic.so \
     -o $out/libfixture_bionic.so Tests/Fixtures/fixture_bionic.c -llog -ldl
+# The JNI conformance suite, compiled against the NDK's jni.h. Its JNI
+# entry points are left for libart.so's provider to answer.
+$common -O1 -shared -Wl,-soname,libfixture_jni.so -o $out/libfixture_jni.so \
+    Tests/Fixtures/fixture_jni.c
+
 # As NDK builds do: libunwind goes into each library, statically.
 cxx="$(echo "$common" | sed 's/^clang-19/clang++-19/') --unwindlib=libunwind"
 $cxx -nostdlib++ -shared -Wl,-soname,libfixture_cxx_thrower.so \
