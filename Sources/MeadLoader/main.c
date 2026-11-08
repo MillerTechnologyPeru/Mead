@@ -19,6 +19,8 @@ static void usage(FILE *out) {
           "  --report    load and bind without running; print imports, missing\n"
           "              symbols and JNI class names\n"
           "  --strict    fail when a non-weak import cannot be resolved\n"
+          "  --selftest  load the library, run its mead_selftest and exit\n"
+          "              with what it returns\n"
           "  -h, --help  show this help\n"
           "\n"
           "environment:\n"
@@ -66,11 +68,13 @@ static char *library_in(const char *directory) {
 }
 
 int main(int argc, char **argv) {
-    bool report = false;
+    bool report = false, selftest = false;
     int first = 1;
     for (; first < argc; first++) {
         if (strcmp(argv[first], "--report") == 0)
             report = true;
+        else if (strcmp(argv[first], "--selftest") == 0)
+            selftest = true;
         else if (strcmp(argv[first], "--strict") == 0)
             setenv("MEAD_STRICT", "1", 0);
         else if (strcmp(argv[first], "-h") == 0 || strcmp(argv[first], "--help") == 0) {
@@ -109,5 +113,16 @@ int main(int argc, char **argv) {
         return 1;
     }
     mead_trace("load", "loaded; the game's initializers have run");
+    if (selftest) {
+        int (*test)(void) = (int (*)(void))mead_find_symbol(image, "mead_selftest");
+        if (!test) {
+            fprintf(stderr, "mead: %s has no mead_selftest\n", target);
+            return 1;
+        }
+        int result = test();
+        printf("%s: %s (%d)\n", target, result == 0 ? "passed" : "FAILED", result);
+        fflush(stdout);
+        return result == 0 ? 0 : 1;
+    }
     return 0;
 }
