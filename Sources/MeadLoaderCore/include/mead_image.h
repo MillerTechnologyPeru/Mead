@@ -11,6 +11,19 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// glibc's elf.h has these without the 64, or not at all.
+#ifndef R_AARCH64_TLS_DTPMOD64
+#define R_AARCH64_TLS_DTPMOD64 1028
+#define R_AARCH64_TLS_DTPREL64 1029
+#define R_AARCH64_TLS_TPREL64 1030
+#endif
+#ifndef R_AARCH64_TLSDESC
+#define R_AARCH64_TLSDESC 1031
+#endif
+#ifndef R_AARCH64_IRELATIVE
+#define R_AARCH64_IRELATIVE 1032
+#endif
+
 typedef struct mead_image {
     char *path;                 // as loaded; owned
     char *soname;               // DT_SONAME, without the directory; owned
@@ -28,10 +41,12 @@ typedef struct mead_image {
     struct mead_image **needed; // the DT_NEEDED images, in order; owned
     size_t needed_count;
     size_t order;               // among every loaded image, in load order
+    struct mead_image *root;    // the library whose load brought this one in
+    bool initialized;           // its initializers have run, or are running
 
     // mead_symbols_setup fills these:
-    const Elf64_Sym *symbols;   // DT_SYMTAB, without the index-0 symbol
-    size_t symbol_count;        // symbols from index 1 on
+    const Elf64_Sym *symbols;   // DT_SYMTAB; index 0 is the null symbol
+    size_t symbol_count;        // including the null symbol
     const char *strings;        // DT_STRTAB
     const uint32_t *gnu_hash;   // DT_GNU_HASH
     const uint32_t *hash;       // DT_HASH
@@ -64,8 +79,9 @@ const Elf64_Phdr *mead_image_segment(const mead_image *image, uint32_t type);
 // The first dynamic entry with a tag, or NULL. DT_NULL ends the table.
 const Elf64_Dyn *mead_image_dynamic(const mead_image *image, uint64_t tag);
 
-// The value a defined symbol in `image` names: its address, or the symbol's
-// st_value for the odd absolute one. NULL for SHN_UNDEF.
+// The value a defined symbol in `image` names: its address, this thread's
+// address for a thread-local one, or the symbol's st_value for the odd
+// absolute one. NULL for SHN_UNDEF.
 void *mead_image_symbol_address(const mead_image *image, const Elf64_Sym *symbol);
 
 // Takes the write permission off every segment the program headers say is
