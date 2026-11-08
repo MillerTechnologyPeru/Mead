@@ -10,4 +10,4 @@ docker build --platform linux/arm64 -t "$image" .
 exec docker run --rm --platform linux/arm64 \
     -v "$PWD:/mead" \
     "$image" \
-    sh -c 'cd /mead && Scripts/build-android-fixtures.sh && swift build --scratch-path .build/linux && swift test --scratch-path .build/linux "$@"' sh "$@"
+    sh -c 'cd /mead && Scripts/build-android-fixtures.sh && swift build --scratch-path .build/linux && swift test --no-parallel --scratch-path .build/linux "$@" && bin=$(swift build --scratch-path .build/linux --show-bin-path) && for selftest in bionic cxx; do "$bin/mead" --selftest .build/mead-fixtures/libfixture_$selftest.so || exit 1; done' sh "$@"
