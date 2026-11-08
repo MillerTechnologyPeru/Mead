@@ -18,9 +18,14 @@ extern "C" {
 // already loaded is returned again.
 void *mead_load_library(const char *path, char **error);
 
-// Looks a symbol up in the library `handle` names, and everything loaded
-// after it, as dlsym does. NULL if missing.
+// Looks a symbol up in the library `handle` names, what it needs, and the
+// providers, as dlsym does; a NULL handle searches everything. NULL if
+// missing.
 void *mead_find_symbol(void *handle, const char *name);
+
+// Lays out TLS for, binds and makes runnable every image not yet done, and
+// runs nothing.
+void mead_bind_loaded(void);
 
 // Loads and binds without running initializers, then prints the library's
 // imports grouped by soname, its relocation kinds, the JNI class names in
