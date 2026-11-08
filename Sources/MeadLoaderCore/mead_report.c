@@ -29,44 +29,60 @@ static const char *relocation_name(uint32_t type) {
     }
 }
 
-// Counts the relocation kinds an image carries, by walking its tables the
-// way mead_fixups does.
-static void count_relocations(const mead_image *image, size_t counts[10]) {
-    enum { ABS, GLOB, JUMP, RELATIVE, DTPMOD, DTPREL, TPREL, TLSDESC, IREL, OTHER };
-    const Elf64_Dyn *table = mead_image_dynamic(image, DT_RELA);
-    const Elf64_Dyn *size = mead_image_dynamic(image, DT_RELASZ);
-    const Elf64_Rela *entries = table ? mead_image_address(image, (uint64_t)table->d_un.d_ptr) : NULL;
-    size_t at = table && size ? (size_t)size->d_un.d_val / sizeof(*entries) : 0;
-    for (size_t index = 0; index < at; index++) {
-        switch ((uint32_t)ELF64_R_TYPE(entries[index].r_info)) {
-        case R_AARCH64_ABS64: counts[ABS]++; break;
-        case R_AARCH64_GLOB_DAT: counts[GLOB]++; break;
-        case R_AARCH64_JUMP_SLOT: counts[JUMP]++; break;
-        case R_AARCH64_RELATIVE: counts[RELATIVE]++; break;
-        case R_AARCH64_TLS_DTPMOD64: counts[DTPMOD]++; break;
-        case R_AARCH64_TLS_DTPREL64: counts[DTPREL]++; break;
-        case R_AARCH64_TLS_TPREL64: counts[TPREL]++; break;
-        case R_AARCH64_TLSDESC: counts[TLSDESC]++; break;
-        case R_AARCH64_IRELATIVE: counts[IREL]++; break;
-        default: counts[OTHER]++; break;
-        }
+enum { ABS, GLOB, JUMP, RELATIVE, DTPMOD, DTPREL, TPREL, TLSDESC, IREL, OTHER, KINDS };
+
+// Counts one relocation, of whichever table it came from.
+static void count_relocation(void *context, uint64_t offset, uint32_t type, size_t symbol_index,
+                             int64_t addend) {
+    size_t *counts = context;
+    (void)offset, (void)symbol_index, (void)addend;
+    switch (type) {
+    case R_AARCH64_ABS64: counts[ABS]++; break;
+    case R_AARCH64_GLOB_DAT: counts[GLOB]++; break;
+    case R_AARCH64_JUMP_SLOT: counts[JUMP]++; break;
+    case R_AARCH64_RELATIVE: counts[RELATIVE]++; break;
+    case R_AARCH64_TLS_DTPMOD64: counts[DTPMOD]++; break;
+    case R_AARCH64_TLS_DTPREL64: counts[DTPREL]++; break;
+    case R_AARCH64_TLS_TPREL64: counts[TPREL]++; break;
+    case R_AARCH64_TLSDESC: counts[TLSDESC]++; break;
+    case R_AARCH64_IRELATIVE: counts[IREL]++; break;
+    default: counts[OTHER]++; break;
     }
 }
 
-// Whether a run of bytes looks like a Java class or method name: letters,
-// digits, dots, slashes, dollars, semicolons and parentheses, with a slash
-// in it (java/lang/String, Lcom/mojang/minecraftpe/MainActivity;,
-// (Ljava/lang/String;)V's shape shows in longer runs).
+// Whether a run of bytes has the shape of what FindClass and GetMethodID are
+// handed: a signature, (Ljava/lang/String;)V, or a class as a/b/Name, perhaps
+// as the descriptor [La/b/Name;. Packages start lower case and classes upper
+// case, which is what tells them from a game's file paths.
 static bool class_like(const char *string, size_t length) {
-    bool slash = false;
-    for (size_t index = 0; index < length; index++) {
-        char at = string[index];
-        if (at == '/' || at == '.')
-            slash = true;
-        else if (!isalnum((unsigned char)at) && strchr("_$;()[]<>", at) == NULL)
-            return false;
+    if (string[0] == '(') {
+        const char *close = strchr(string, ')');
+        return close && close[1] && strchr("VZBCSIJFDL[", close[1]) &&
+               strspn(string, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                              "0123456789_$/;[()") == length;
     }
-    return slash;
+    const char *start = string, *end = string + length;
+    while (start < end && *start == '[')
+        start++;
+    if (end - start > 2 && *start == 'L' && end[-1] == ';') {
+        start++;
+        end--;
+    }
+    if (start == end || !islower((unsigned char)*start))
+        return false;
+    bool slash = false;
+    const char *segment = start;
+    for (const char *at = start; at < end; at++) {
+        if (*at == '/') {
+            if (at == segment)
+                return false;
+            slash = true;
+            segment = at + 1;
+        } else if (!isalnum((unsigned char)*at) && *at != '_' && *at != '$') {
+            return false;
+        }
+    }
+    return slash && segment < end && isupper((unsigned char)*segment);
 }
 
 // Prints the JNI class-name candidates in an image's read-only bytes,
@@ -80,7 +96,7 @@ static void report_jni_classes(const mead_image *image) {
     for (uint16_t segment = 0; segment < image->phnum && seen_count < MAX; segment++) {
         const Elf64_Phdr *at = (const Elf64_Phdr *)
             ((const char *)image->phdr + (size_t)segment * image->phentsize);
-        if (at->p_type != PT_LOAD || !(at->p_flags & PF_X))
+        if (at->p_type != PT_LOAD || (at->p_flags & PF_W))
             continue;
         const char *bytes = mead_image_address(image, at->p_vaddr);
         size_t length = (size_t)at->p_filesz;
@@ -119,11 +135,9 @@ int mead_report(const char *path) {
         free(error);
         return 1;
     }
-    mead_tlv_layout();
+    mead_bind_loaded();
     size_t count = 0;
     mead_image *const *images = mead_deps_images(&count);
-    for (size_t index = 0; index < count; index++)
-        mead_fixups_apply(images[index]);
 
     printf("%s\n", path);
     for (size_t index = 0; index < count; index++) {
@@ -141,13 +155,13 @@ int mead_report(const char *path) {
         for (size_t needed = 0; needed < at->needed_count; needed++)
             printf("      needs %s\n", at->needed[needed]->soname ? at->needed[needed]->soname
                                                                   : at->needed[needed]->path);
-        size_t counts[10] = { 0 };
-        count_relocations(at, counts);
-        static const char *names[10] = { "ABS64",     "GLOB_DAT",  "JUMP_SLOT", "RELATIVE",
+        size_t counts[KINDS] = { 0 };
+        mead_fixups_each(at, count_relocation, counts);
+        static const char *names[KINDS] = { "ABS64",     "GLOB_DAT",  "JUMP_SLOT", "RELATIVE",
                                          "DTPMOD64",  "DTPREL64",  "TPREL64",   "TLSDESC",
                                          "IRELATIVE", "other" };
         printf("    relocations:");
-        for (int which = 0; which < 10; which++)
+        for (int which = 0; which < KINDS; which++)
             if (counts[which])
                 printf(" %s=%zu", names[which], counts[which]);
         printf("\n");
@@ -155,13 +169,14 @@ int mead_report(const char *path) {
     }
     report_jni_classes(image);
 
-    size_t missing = 0;
-    const char *const *missing_names = mead_fixups_missing(&missing);
+    size_t missing = mead_fixups_missing_total();
     if (missing) {
         printf("  missing (%zu):\n", missing);
-        for (size_t index = 0; index < missing; index++)
-            printf("    %s (wanted %zu times)\n", missing_names[index],
-                   mead_fixups_missing_count(missing_names[index]));
+        for (size_t index = 0; index < missing; index++) {
+            size_t wanted = 0;
+            const char *name = mead_fixups_missing_at(index, &wanted);
+            printf("    %s (wanted %zu times)\n", name, wanted);
+        }
         return 1;
     }
     printf("  nothing missing\n");
