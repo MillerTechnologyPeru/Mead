@@ -11,6 +11,7 @@
 #include "mead_image.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Reads `image`'s PT_TLS segment, if it has one. Call after mapping.
@@ -38,9 +39,13 @@ void *mead_tlv_block(const mead_image *image);
 // it for the threads it makes.
 void mead_tlv_thread_init(void);
 
+// How big the block is: what every thread's stack must have room for.
+size_t mead_tlv_block_bytes(void);
+
 // The TLS descriptor resolver fixups point descriptors at: handed the
 // descriptor, it gives back the TP-relative offset in its value half.
-// A plain C function is the TLSDESC ABI: x0 in, x0 out, the rest as any.
+// x0 in, x0 out, and every other register preserved, as the TLSDESC ABI
+// asks; assembly for that reason.
 int64_t mead_tlsdesc_resolve(const void *descriptor);
 
 #endif
