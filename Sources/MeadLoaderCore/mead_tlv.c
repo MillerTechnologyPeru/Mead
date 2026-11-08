@@ -48,6 +48,9 @@ bool mead_tlv_layout(void) {
         if (image->tls_memsz == 0 || image->tls_module != 0)
             continue; // no TLS, or a block already given
         used = (used + image->tls_alignment - 1) & ~(image->tls_alignment - 1);
+        if (image->tls_alignment > 64)
+            mead_fatal("%s wants thread-local storage aligned to %lu; mead's is aligned to 64",
+                       image->path, (unsigned long)image->tls_alignment);
         uint64_t offset = used;
         used += image->tls_memsz;
         if (used > MEAD_TLV_BLOCK_SIZE)
@@ -63,6 +66,10 @@ bool mead_tlv_layout(void) {
     }
     pthread_mutex_unlock(&lock);
     return true;
+}
+
+size_t mead_tlv_block_bytes(void) {
+    return MEAD_TLV_BLOCK_SIZE;
 }
 
 int64_t mead_tlv_tprel(const mead_image *image) {
@@ -95,11 +102,14 @@ void mead_tlv_thread_init(void) {
     }
 }
 
-int64_t mead_tlsdesc_resolve(const void *descriptor) {
-    // The descriptor's halves: who to call, and what to hand back.
-    const struct {
-        int64_t (*resolver)(const void *);
-        int64_t value;
-    } *tlsdesc = descriptor;
-    return tlsdesc->value;
-}
+// Handed the descriptor in x0, gives back the value half in x0. Written out
+// because the TLSDESC ABI has the caller keep every other register live
+// across the call, which a compiled function — at -O0 especially — is free
+// not to do.
+__asm__(".text\n"
+        ".globl mead_tlsdesc_resolve\n"
+        ".type mead_tlsdesc_resolve, %function\n"
+        "mead_tlsdesc_resolve:\n"
+        "    ldr x0, [x0, #8]\n"
+        "    ret\n"
+        ".size mead_tlsdesc_resolve, . - mead_tlsdesc_resolve\n");
