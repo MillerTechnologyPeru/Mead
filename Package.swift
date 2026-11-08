@@ -6,6 +6,8 @@ let package = Package(
     products: [
         // Loader: runs arm64 Android ELF libraries on arm64 Linux.
         .executable(name: "mead", targets: ["MeadLoader"]),
+        // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
+        .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
     ],
     targets: [
         // Interface between the loader and the provider libraries that
@@ -19,6 +21,16 @@ let package = Package(
         .executableTarget(
             name: "MeadLoader",
             dependencies: ["MeadLoaderCore"]
+        ),
+        // What bionic's ABI needs that only C can say: variadics, struct
+        // translation, and the table of what Android code may call.
+        .target(
+            name: "CMeadBionic",
+            dependencies: ["MeadInterface"]
+        ),
+        .target(
+            name: "MeadBionic",
+            dependencies: ["CMeadBionic", "MeadInterface"]
         ),
         .testTarget(
             name: "MeadLoaderTests",
