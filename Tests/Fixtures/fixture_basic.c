@@ -29,3 +29,26 @@ const char *fixture_string(void) {
 int fixture_use_extra(int x) {
     return fixture_extra(x);
 }
+
+// Calls what nothing answers, for the stub to report itself.
+int fixture_call_missing(int x) {
+    return mead_missing_function(x);
+}
+
+// Weak imports: one libfixture_extra.so defines and one nothing does.
+__attribute__((weak)) int fixture_extra_weak(void);
+__attribute__((weak)) int fixture_nowhere(void);
+
+int fixture_weak_found(void) {
+    return fixture_extra_weak ? fixture_extra_weak() : 0;
+}
+
+int fixture_weak_missing_is_null(void) {
+    return fixture_nowhere == NULL;
+}
+
+// Defined by libfixture_extra.so too. This one, the root's, is the one both
+// libraries are to bind to.
+int fixture_interposed(void) {
+    return 2;
+}
