@@ -12,3 +12,11 @@ int fixture_tls_bump(void) {
 int fixture_tls_peek(void) {
     return fixture_tls_counter;
 }
+
+// Exported, so it is reached through its symbol rather than the module's
+// offset alone: the relocation has to add the symbol's place in the block.
+__thread int fixture_tls_exported = 11;
+
+int fixture_tls_exported_peek(void) {
+    return fixture_tls_exported;
+}
