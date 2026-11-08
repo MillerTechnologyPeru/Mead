@@ -7,11 +7,34 @@
 // and binds its imports to the providers; the providers are ordinary Linux
 // ELF libraries.
 
+#include <elf.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // Swift reads this; #define would not cross into it.
-enum { MEAD_STARTUP_INFO_VERSION = 1 };
+enum { MEAD_STARTUP_INFO_VERSION = 2 };
+
+// Dl_info as bionic and glibc both lay it out.
+typedef struct mead_dl_info {
+    const char *dli_fname;
+    void *dli_fbase;
+    const char *dli_sname;
+    void *dli_saddr;
+} mead_dl_info;
+
+// struct dl_phdr_info as bionic and glibc both lay it out; glibc shows its
+// own only to _GNU_SOURCE, which a Swift import of this header is not.
+typedef struct mead_dl_phdr_info {
+    Elf64_Addr dlpi_addr;
+    const char *dlpi_name;
+    const Elf64_Phdr *dlpi_phdr;
+    Elf64_Half dlpi_phnum;
+    unsigned long long dlpi_adds;
+    unsigned long long dlpi_subs;
+    size_t dlpi_tls_modid;
+    void *dlpi_tls_data;
+} mead_dl_phdr_info;
 
 typedef struct mead_startup_info {
     uint32_t version;
@@ -39,10 +62,26 @@ typedef struct mead_startup_info {
     // the Android images loaded after the one `caller` is in, then in the
     // providers. NULL if missing.
     void *(*lookup_symbol_after)(const void *caller, const char *name);
+
+    // The dynamic linker over the Android images, for libdl.so's provider.
+    void *(*dl_open)(const char *name, int flags);
+    void *(*dl_sym)(void *handle, const char *name, const void *caller);
+    int (*dl_close)(void *handle);
+    const char *(*dl_error)(void);
+    int (*dl_addr)(const void *address, mead_dl_info *info);
+    int (*dl_iterate_phdr)(int (*callback)(mead_dl_phdr_info *, size_t, void *), void *data);
+
+    // Gives the calling thread the initial values of the Android images'
+    // thread-locals. Every thread that runs Android code must have called it.
+    void (*thread_setup)(void);
+
+    // What each thread's static TLS costs on top of the stack it asked for.
+    size_t thread_tls_bytes;
 } mead_startup_info;
 
 // Providers may export this function. The loader calls it after mapping and
-// binding every image, before any Android initializer runs.
+// binding every image, before any Android initializer runs. `info` stays
+// valid for the life of the process.
 typedef void (*mead_provider_startup_fn)(const mead_startup_info *info);
 #define MEAD_PROVIDER_STARTUP_SYMBOL "mead_provider_startup"
 
@@ -64,9 +103,10 @@ typedef void (*mead_provider_image_fn)(const mead_image_info *image);
 
 // Providers may export this function. The loader calls it, while binding,
 // for a symbol the provider does not define as an ELF symbol; it returns the
-// symbol's address, or NULL. Lets a provider define data symbols, such as
-// exported constants and errno, at run time. Called before
-// mead_provider_startup.
+// symbol's address, or NULL. Only a provider's own ELF symbols are taken
+// without asking, never those of the libraries it depends on: a provider
+// says through this hook which host functions Android code may call as they
+// are. Called before mead_provider_startup.
 typedef void *(*mead_provider_symbol_fn)(const char *name);
 #define MEAD_PROVIDER_SYMBOL_SYMBOL "mead_provider_symbol"
 
