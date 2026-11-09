@@ -2,8 +2,10 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 // bionic numbers sysconf's and pathconf's names differently from glibc.
@@ -106,4 +108,38 @@ __attribute__((constructor)) static void make_ctype_table(void) {
         if (c == ' ') flags |= B;
         ctype_table[c + 1] = flags;
     }
+}
+
+// Android lets an app raise its threads' priority, down to nice -19 for
+// audio; Linux lets an ordinary user go no lower than RLIMIT_NICE allows,
+// which is usually not below where the thread is. Code written for Android
+// takes a refusal as fatal (FMOD's mixer thread exits on it), so a raise
+// goes as far as Linux allows and is reported done, as it would be there.
+// A raise that is allowed, and every lowering, is the host's own answer.
+int bionic_setpriority(int which, id_t who, int priority) {
+    if (setpriority((__priority_which_t)which, who, priority) == 0)
+        return 0;
+    int error = errno;
+    if (error != EACCES && error != EPERM) {
+        errno = error;
+        return -1;
+    }
+    errno = 0;
+    int current = getpriority((__priority_which_t)which, who);
+    if (errno != 0 || priority >= current) {
+        errno = error;
+        return -1;
+    }
+    struct rlimit limit;
+    int floor = current;
+    if (getrlimit(RLIMIT_NICE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY && 20 - (int)limit.rlim_cur < current)
+        floor = 20 - (int)limit.rlim_cur;
+    int granted = priority > floor ? priority : floor;
+    if (granted < current)
+        setpriority((__priority_which_t)which, who, granted);
+    const char *trace = getenv("MEAD_TRACE");
+    if (trace && (strstr(trace, "bionic") || strstr(trace, "all")))
+        fprintf(stderr, "mead(bionic): setpriority to %d refused; nice %d is as far as this user may go\n", priority,
+                granted < current ? granted : current);
+    return 0;
 }
