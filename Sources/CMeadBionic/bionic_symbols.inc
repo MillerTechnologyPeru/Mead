@@ -153,6 +153,10 @@ ALIAS(__errno, __errno_location)
 ALIAS(setjmp, _setjmp)
 ALIAS(sigsetjmp, _setjmp)
 ALIAS(mallinfo, mallinfo2)
+// bionic's strerror_r is POSIX's, returning an int; glibc's is the GNU one,
+// which bionic calls __gnu_strerror_r.
+ALIAS(strerror_r, __xpg_strerror_r)
+ALIAS(__gnu_strerror_r, strerror_r)
 
 // The same ABI in both libraries, by Scripts/compare-bionic-abi.sh.
 PASS(__cmsg_nxthdr)
@@ -694,7 +698,6 @@ PASS(strcpy)
 PASS(strcspn)
 PASS(strdup)
 PASS(strerror)
-PASS(strerror_r)
 PASS(strftime)
 PASS(strftime_l)
 PASS(strlen)
