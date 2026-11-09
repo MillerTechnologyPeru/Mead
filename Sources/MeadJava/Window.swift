@@ -14,6 +14,15 @@ public final class JavaClassLoader: JavaObject {
     public func loadClass(_ name: String?) -> JavaObject? {
         findClass(name)
     }
+
+    /// Where System.loadLibrary would find lib<name>.so: the app's own native
+    /// library directory, or null if it isn't there.
+    @JavaMethod("findLibrary", signature: "(Ljava/lang/String;)Ljava/lang/String;")
+    public func findLibrary(_ name: String?) -> String? {
+        guard let name, let directory = AndroidEnvironment.nativeLibraryDirectory else { return nil }
+        let path = "\(directory)/lib\(name).so"
+        return access(path, R_OK) == 0 ? path : nil
+    }
 }
 
 @JavaClass("android/content/res/Configuration")
@@ -36,6 +45,8 @@ public final class JavaConfiguration: JavaObject {
     @JavaField("smallestScreenWidthDp") public var smallestScreenWidthDp: Int32 = 720
     @JavaField("touchscreen") public var touchscreen: Int32 = 3
     @JavaField("uiMode") public var uiMode: Int32 = 17
+
+    @JavaMethod("getLocales", signature: "()Landroid/os/LocaleList;") public func getLocales() -> JavaLocaleList? { JavaLocaleList() }
 }
 
 @JavaClass("androidx/core/graphics/Insets")
@@ -51,12 +62,37 @@ public final class JavaDisplay: JavaObject {
     @JavaMethod("getRefreshRate") public func getRefreshRate() -> Float { 60 }
     @JavaMethod("getAppVsyncOffsetNanos") public func getAppVsyncOffsetNanos() -> Int64 { 0 }
     @JavaMethod("getPresentationDeadlineNanos") public func getPresentationDeadlineNanos() -> Int64 { 11_000_000 }
+    @JavaMethod("getDisplayId") public func getDisplayId() -> Int32 { 0 }
+    @JavaMethod("getRotation") public func getRotation() -> Int32 { 0 }
+    @JavaMethod("getWidth") public func getWidth() -> Int32 { DisplaySize.current.withLock { $0.width } }
+    @JavaMethod("getHeight") public func getHeight() -> Int32 { DisplaySize.current.withLock { $0.height } }
+    @JavaMethod("isHdr") public func isHdr() -> Bool { false }
+    @JavaMethod("isWideColorGamut") public func isWideColorGamut() -> Bool { false }
+    @JavaMethod("getName") public func getName() -> String? { "Built-in Screen" }
+
+    @JavaMethod("getMetrics", signature: "(Landroid/util/DisplayMetrics;)V") public func getMetrics(_ metrics: JavaObject?) {
+        guard let metrics = metrics as? JavaDisplayMetrics else { return }
+        let size = DisplaySize.current.withLock { $0 }
+        metrics.widthPixels = size.width
+        metrics.heightPixels = size.height
+    }
+
+    @JavaMethod("getRealMetrics", signature: "(Landroid/util/DisplayMetrics;)V") public func getRealMetrics(_ metrics: JavaObject?) {
+        getMetrics(metrics)
+    }
+
+    /// Android lists modes it can switch to; a window has none to offer.
+    @JavaMethod("getSupportedModes", signature: "()[Landroid/view/Display$Mode;") public func getSupportedModes() -> JavaObject? {
+        JavaRuntime.shared.newObjectArray(elementClass: "android/view/Display$Mode", count: 0)
+    }
 }
 
 @JavaClass("android/view/WindowManager")
 public final class JavaWindowManager: JavaObject {
     private let display = JavaDisplay()
     @JavaMethod("getDefaultDisplay") public func getDefaultDisplay() -> JavaDisplay? { display }
+    @JavaMethod("getMaximumWindowMetrics") public func getMaximumWindowMetrics() -> JavaWindowMetrics? { JavaWindowMetrics() }
+    @JavaMethod("getCurrentWindowMetrics") public func getCurrentWindowMetrics() -> JavaWindowMetrics? { JavaWindowMetrics() }
 }
 
 /// A value several threads read and write.
