@@ -244,6 +244,18 @@ public final class JavaMinecraftActivity: JavaGameActivity {
         runUiCallbacks()
     }
 
+    /// Whether the game wants the pointer captured, as Android's
+    /// requestPointerCapture does: hidden, and its movement reported as
+    /// movement rather than as a place. Whatever runs the window applies it.
+    public static var cursorLocked: Bool {
+        get { cursorLockedFlag.withLock { $0 } }
+        set { cursorLockedFlag.withLock { $0 = newValue } }
+    }
+    private static let cursorLockedFlag = LockedValue(false)
+
+    @JavaMethod("lockCursor") public func lockCursor() { Self.cursorLocked = true }
+    @JavaMethod("unlockCursor") public func unlockCursor() { Self.cursorLocked = false }
+
     @JavaMethod("getInternalStoragePath") public func getInternalStoragePath() -> String? { AndroidEnvironment.filesDirectory }
     @JavaMethod("getExternalStoragePath") public func getExternalStoragePath() -> String? { AndroidEnvironment.externalDirectory }
     // There was never an older install: empty is how to say so. Given a path,
@@ -288,4 +300,22 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     @JavaMethod("getBroadcastAddresses", signature: "()[Ljava/lang/String;") public func getBroadcastAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().broadcasts) }
     @JavaMethod("getIPAddresses", signature: "()[Ljava/lang/String;") public func getIPAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().addresses) }
     @JavaMethod("calculateAvailableDiskFreeSpace") public func calculateAvailableDiskFreeSpace(_ path: String?) -> Int64 { 1 << 34 }
+}
+
+/// A value several threads read and write.
+final class LockedValue<Value> {
+    private var value: Value
+    private let mutex: UnsafeMutablePointer<pthread_mutex_t> = {
+        let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(mutex, nil)
+        return mutex
+    }()
+
+    init(_ value: Value) { self.value = value }
+
+    func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
+        pthread_mutex_lock(mutex)
+        defer { pthread_mutex_unlock(mutex) }
+        return body(&value)
+    }
 }
