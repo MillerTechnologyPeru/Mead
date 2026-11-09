@@ -257,6 +257,28 @@ static int test_strings_and_files(void) {
     return 0;
 }
 
+// What Android's libstdc++.so has for C++ code to call.
+int __cxa_guard_acquire(unsigned long long *guard);
+void __cxa_guard_release(unsigned long long *guard);
+void __cxa_guard_abort(unsigned long long *guard);
+void *_Znwm(size_t size);
+void _ZdlPv(void *memory);
+
+static int test_libstdcxx(void) {
+    unsigned long long guard = 0;
+    CHECK(__cxa_guard_acquire(&guard) == 1);
+    __cxa_guard_abort(&guard);
+    CHECK(*(unsigned char *)&guard == 0);
+    CHECK(__cxa_guard_acquire(&guard) == 1);
+    __cxa_guard_release(&guard);
+    CHECK(*(unsigned char *)&guard == 1);
+    CHECK(__cxa_guard_acquire(&guard) == 0);
+    void *memory = _Znwm(32);
+    CHECK(memory != NULL);
+    _ZdlPv(memory);
+    return 0;
+}
+
 static int visited_properties;
 
 static void visit_property(const prop_info *property, void *cookie) {
@@ -320,7 +342,7 @@ int mead_selftest(void) {
     int (*const tests[])(void) = {
         test_stdio,    test_signals,          test_sysconf,           test_addrinfo,
         test_threads,  test_mutexes,          test_memory_and_jumps,  test_strings_and_files,
-        test_android_services, test_dynamic_linker,
+        test_android_services, test_dynamic_linker,    test_libstdcxx,
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
         int failed = tests[index]();
