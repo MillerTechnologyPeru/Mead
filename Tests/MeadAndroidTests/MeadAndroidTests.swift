@@ -96,6 +96,22 @@ private nonisolated(unsafe) var callbackCalls = 0
     #expect(androidKeyCode(forScancode: 500) == 0)
 }
 
+@Test func gamepadButtonsMapToAndroidsCodes() {
+    #expect(androidKeyCode(forGamepadButton: 0) == 96) // south is A
+    #expect(androidKeyCode(forGamepadButton: 3) == 100) // north is Y
+    #expect(androidKeyCode(forGamepadButton: 11) == 19) // the D-pad is the arrow keys
+    #expect(androidKeyCode(forGamepadButton: 200) == 0)
+}
+
+@Test func gamepadAxesMapToAndroidsAndKeepTheirRange() {
+    #expect(androidAxes(forGamepadAxis: 0) == [AMOTION_EVENT_AXIS_X])
+    #expect(androidAxes(forGamepadAxis: 3) == [AMOTION_EVENT_AXIS_RZ])
+    #expect(androidAxes(forGamepadAxis: 4) == [AMOTION_EVENT_AXIS_LTRIGGER, AMOTION_EVENT_AXIS_BRAKE])
+    #expect(androidAxisValue(32767) == 1)
+    #expect(androidAxisValue(-32768) == -1)
+    #expect(androidAxisValue(0) == 0)
+}
+
 @Test func assetNamesCannotLeaveTheAssets() {
     let manager = AssetManager()
     manager.root = "/game/assets"
@@ -134,7 +150,8 @@ private nonisolated(unsafe) var callbackCalls = 0
     JavaFramework.register()
     let runtime = JavaRuntime.shared
     for name in ["android/app/NativeActivity", "android/content/Context", "android/os/Build$VERSION",
-                 "java/util/ArrayList", "java/util/HashMap", "java/util/UUID", "java/lang/System", "java/lang/Integer"] {
+                 "java/util/ArrayList", "java/util/HashMap", "java/util/UUID", "java/lang/System", "java/lang/Integer",
+                 "org/fmod/FMOD"] {
         #expect(runtime.existingClass(named: name)?.isSynthesized == false, "\(name)")
     }
     let context = runtime.existingClass(named: "android/content/Context")!
