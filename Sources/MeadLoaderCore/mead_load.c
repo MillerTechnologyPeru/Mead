@@ -45,10 +45,20 @@ static bool startup_load_library(const char *path) {
     return loaded != NULL;
 }
 
+// The information each provider gets at startup; it stays valid for the
+// life of the process, as providers keep the pointer.
+static mead_startup_info startup_info;
+
+static void start_provider(void *handle) {
+    mead_provider_startup_fn startup =
+        (mead_provider_startup_fn)dlsym(handle, MEAD_PROVIDER_STARTUP_SYMBOL);
+    if (startup)
+        startup(&startup_info);
+}
+
 static void providers_startup(const char *progname) {
     init_argv[0] = (char *)progname;
-    static mead_startup_info info; // providers keep the pointer
-    info = (mead_startup_info){
+    startup_info = (mead_startup_info){
         .version = MEAD_STARTUP_INFO_VERSION,
         .argc = 1,
         .argv = init_argv,
@@ -71,14 +81,9 @@ static void providers_startup(const char *progname) {
     const char **files;
     size_t count;
     mead_deps_providers(&handles, &files, &count);
-    for (size_t index = 0; index < count; index++) {
-        if (!handles[index])
-            continue;
-        mead_provider_startup_fn startup =
-            (mead_provider_startup_fn)dlsym(handles[index], MEAD_PROVIDER_STARTUP_SYMBOL);
-        if (startup)
-            startup(&info);
-    }
+    for (size_t index = 0; index < count; index++)
+        start_provider(handles[index]);
+    mead_deps_set_provider_opened(start_provider);
 }
 
 // The image hooks the providers may export (mead_interface.h), called just
