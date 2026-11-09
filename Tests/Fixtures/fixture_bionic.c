@@ -87,6 +87,41 @@ static int test_signals(void) {
     return 0;
 }
 
+// Audio threads raise their priority on Android; a Linux user usually may
+// not, and that must not be the failure it would be taken for.
+#include <sys/resource.h>
+// bionic's smallest stack is 16 KB; FMOD asks for about 32 KB.
+static void *small_stack_body(void *argument) {
+    volatile char scratch[8 * 1024];
+    scratch[0] = 1;
+    scratch[sizeof(scratch) - 1] = 2;
+    *(int *)argument = scratch[0] + scratch[sizeof(scratch) - 1];
+    return NULL;
+}
+
+static int test_small_stacks(void) {
+    pthread_attr_t attr;
+    CHECK(pthread_attr_init(&attr) == 0);
+    CHECK(pthread_attr_setstacksize(&attr, 8 * 1024) == EINVAL);
+    CHECK(pthread_attr_setstacksize(&attr, 16 * 1024) == 0);
+    CHECK(pthread_attr_setstacksize(&attr, 32 * 1024) == 0);
+    pthread_t thread;
+    int result = 0;
+    CHECK(pthread_create(&thread, &attr, small_stack_body, &result) == 0);
+    CHECK(pthread_join(thread, NULL) == 0);
+    CHECK(result == 3);
+    pthread_attr_destroy(&attr);
+    return 0;
+}
+
+static int test_priority(void) {
+    CHECK(setpriority(PRIO_PROCESS, 0, -16) == 0);
+    CHECK(setpriority(PRIO_PROCESS, 0, 5) == 0);
+    CHECK(getpriority(PRIO_PROCESS, 0) == 5);
+    CHECK(setpriority(PRIO_PROCESS, -1, 0) == -1);
+    return 0;
+}
+
 static int test_sysconf(void) {
     CHECK(sysconf(_SC_PAGESIZE) == getpagesize());
     CHECK(sysconf(_SC_NPROCESSORS_ONLN) >= 1);
@@ -351,7 +386,7 @@ int mead_selftest(void) {
     int (*const tests[])(void) = {
         test_stdio,    test_signals,          test_sysconf,           test_addrinfo,
         test_threads,  test_mutexes,          test_memory_and_jumps,  test_strings_and_files,
-        test_android_services, test_dynamic_linker,    test_libstdcxx,
+        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
         int failed = tests[index]();
