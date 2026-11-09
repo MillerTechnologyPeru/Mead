@@ -65,6 +65,7 @@ final class ActivityRunner {
         }
         defer { SDL.destroyWindow(sdlWindow) }
         let window = NativeWindow(handle: sdlWindow, width: width, height: height)
+        NativeWindow.current = window
 
         let thread = JavaRuntime.shared.attachCurrentThread()
         let javaActivity = JavaNativeActivity()
@@ -129,6 +130,7 @@ final class ActivityRunner {
         case MEAD_SDL_EVENT_QUIT, MEAD_SDL_EVENT_WINDOW_CLOSE_REQUESTED:
             return false
         case MEAD_SDL_EVENT_WINDOW_RESIZED:
+            window.windowWasResized()
             activity.pointee.callbacks.pointee.onNativeWindowResized?(activity, window.pointer)
         case MEAD_SDL_EVENT_WINDOW_FOCUS_GAINED:
             activity.pointee.callbacks.pointee.onWindowFocusChanged?(activity, 1)
