@@ -143,3 +143,29 @@ int bionic_setpriority(int which, id_t who, int priority) {
                 granted < current ? granted : current);
     return 0;
 }
+
+// bionic's basename is POSIX's, from <libgen.h>: "/usr/lib/" is "lib", and
+// the path is never written to. glibc's plain basename is the GNU one, which
+// says "" for a trailing slash. Answered in a buffer per thread, as bionic does.
+char *bionic_basename(const char *path) {
+    static __thread char buffer[4096];
+    if (!path || !*path)
+        return strcpy(buffer, ".");
+    size_t end = strlen(path);
+    while (end > 1 && path[end - 1] == '/')
+        end--;
+    // Only slashes: the root.
+    if (end == 1 && path[0] == '/')
+        return strcpy(buffer, "/");
+    size_t start = end;
+    while (start > 0 && path[start - 1] != '/')
+        start--;
+    size_t length = end - start;
+    if (length >= sizeof(buffer)) {
+        errno = ENAMETOOLONG;
+        return NULL;
+    }
+    memcpy(buffer, path + start, length);
+    buffer[length] = 0;
+    return buffer;
+}
