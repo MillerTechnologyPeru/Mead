@@ -17,6 +17,7 @@ public enum JavaMember {
 open class JavaObject {
     open class var javaClassName: String { "java/lang/Object" }
     open class var javaSuperclassType: JavaObject.Type? { nil }
+    open class var javaInterfaceNames: [String] { [] }
 
     open class func javaMembers() -> [JavaMember] {
         [
@@ -186,6 +187,8 @@ public final class JavaClass: JavaObject {
     public let name: String
     public private(set) var superclass: JavaClass?
     public let isSynthesized: Bool
+    public internal(set) var isInterface = false
+    public internal(set) var interfaces: [JavaClass] = []
     let swiftType: JavaObject.Type?
     var methods: [MemberKey: JavaMethod] = [:]
     var fields: [MemberKey: JavaField] = [:]
@@ -225,6 +228,16 @@ public final class JavaClass: JavaObject {
                 }
                 current = at.superclass
             }
+            // Only then what interfaces declare: a real method always wins.
+            current = self
+            while let at = current {
+                for interface in at.interfaces {
+                    if let found = interface.findMethod(key) {
+                        return found
+                    }
+                }
+                current = at.superclass
+            }
             return nil
         }
     }
@@ -245,7 +258,7 @@ public final class JavaClass: JavaObject {
     public func isSubclass(of other: JavaClass) -> Bool {
         var current: JavaClass? = self
         while let at = current {
-            if at === other {
+            if at === other || at.interfaces.contains(where: { $0.isSubclass(of: other) }) {
                 return true
             }
             current = at.superclass
@@ -258,20 +271,32 @@ public final class JavaClass: JavaObject {
     func method(named name: String, signature: String, isStatic: Bool) -> JavaMethod? {
         let runtime = JavaRuntime.shared
         runtime.trace("\(isStatic ? "GetStaticMethodID" : "GetMethodID") \(self.name).\(name)\(signature)")
-        return runtime.lock.withLock {
-            let key = MemberKey(name: name, signature: signature)
-            if let found = findMethod(key) {
-                if found.isStatic == isStatic {
-                    return found
-                }
-                // RegisterNatives could not know: the first lookup settles it.
-                if found.everRegistered {
-                    found.isStatic = isStatic
-                    return found
-                }
+        let key = MemberKey(name: name, signature: signature)
+        let existing: JavaMethod? = runtime.lock.withLock {
+            guard let found = findMethod(key) else { return nil }
+            if found.isStatic == isStatic {
+                return found
             }
-            runtime.problemOnce("\(self.name).\(name)\(signature) is not implemented")
+            // RegisterNatives could not know: the first lookup settles it.
+            if found.everRegistered {
+                found.isStatic = isStatic
+                return found
+            }
+            return nil
+        }
+        if let existing {
+            return existing
+        }
+        // Looked for outside the lock: the loader's lock is the other way
+        // round, when an initializer calls into JNI.
+        let native = runtime.boundNative(owner: self.name, name: name, signature: signature)
+        return runtime.lock.withLock {
+            if native == nil {
+                runtime.problemOnce("\(self.name).\(name)\(signature) is not implemented")
+            }
             let method = JavaMethod(name: name, signature: signature, isStatic: isStatic, owner: self, isSynthesized: true)
+            method.native = native
+            method.everRegistered = native != nil
             methods[key] = method
             return method
         }
