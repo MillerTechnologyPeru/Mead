@@ -2,6 +2,22 @@
 // SHIM, PASS, ALIAS and ZLIB defined: see bionic_table.c.
 
 // Translated, or Android's alone: a bionic_ function in this target.
+// libstdc++.so, as Android has it.
+SHIM(__cxa_guard_acquire)
+SHIM(__cxa_guard_release)
+SHIM(__cxa_guard_abort)
+SHIM(__cxa_pure_virtual)
+SHIM(_Znwm)
+SHIM(_Znam)
+SHIM(_ZdlPv)
+SHIM(_ZdaPv)
+SHIM(_ZdlPvm)
+SHIM(_ZdaPvm)
+SHIM(_ZnwmRKSt9nothrow_t)
+SHIM(_ZnamRKSt9nothrow_t)
+SHIM(_ZdlPvRKSt9nothrow_t)
+SHIM(_ZdaPvRKSt9nothrow_t)
+
 SHIM(pthread_mutex_init)
 SHIM(pthread_mutex_destroy)
 SHIM(pthread_mutex_lock)
