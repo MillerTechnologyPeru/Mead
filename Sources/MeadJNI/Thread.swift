@@ -183,6 +183,11 @@ public final class JavaThread {
         let runtime = JavaRuntime.shared
         runtime.trace("\(method.owner.name).\(method.name)\(method.signature)")
         memset(result, 0, MemoryLayout<jvalue>.size)
+        // A proxy's instance methods are all its handler's.
+        if !method.isStatic, method.name != "<init>", let proxy = receiver as? JavaProxy {
+            result.pointee = proxy.handler(self, method, arguments)
+            return
+        }
         if let native = method.native {
             pushFrame()
             let target = newLocal(method.isStatic ? method.owner : receiver)
