@@ -90,8 +90,9 @@ final class GameActivityRunner {
         }
 
         // Its text input goes through an object GameActivity keeps.
+        let textInput = JavaTextInputConnection()
         var connection = jvalue()
-        connection.l = thread.newLocal(JavaTextInputConnection())
+        connection.l = thread.newLocal(textInput)
         lifecycle("setInputConnectionNative", "(JLcom/google/androidgamesdk/gametextinput/InputConnection;)V", [connection])
 
         lifecycle("onStartNative")
@@ -153,6 +154,30 @@ final class GameActivityRunner {
             event.l = thread.newLocal(key)
             let name = key.action == JavaKeyEvent.actionDown ? "onKeyDownNative" : "onKeyUpNative"
             _ = thread.call(Self.gameActivity, name, "(JLandroid/view/KeyEvent;)Z", on: activity, [pointer, event])
+        }, editText: { edit in
+            thread.pushFrame()
+            defer { thread.popFrame() }
+            let box = JavaMinecraftActivity.textBox
+            if box.isActive {
+                // Minecraft's own text box: the whole text, then the caret.
+                let mainActivity = "com/mojang/minecraftpe/MainActivity"
+                if edit == .submit, !box.isMultiline {
+                    _ = thread.call(mainActivity, "nativeReturnKeyPressed", "()V", on: activity, [])
+                    return
+                }
+                let after = box.apply(edit == .submit ? .insert("\n") : edit)
+                var text = jvalue()
+                text.l = thread.newLocal(JavaString(after.text))
+                _ = thread.call(mainActivity, "nativeSetTextboxText", "(Ljava/lang/String;)V", on: activity, [text])
+                var caret = jvalue()
+                caret.i = Int32(after.start)
+                _ = thread.call(mainActivity, "nativeCaretPosition", "(I)V", on: activity, [caret])
+                return
+            }
+            var state = jvalue()
+            state.l = thread.newLocal(textInput.apply(edit))
+            thread.call(Self.gameActivity, "onTextInputEventNative", "(JLcom/google/androidgamesdk/gametextinput/State;)V",
+                        on: activity, [pointer, state])
         })
 
         // MEAD_DEBUG_TAPS="seconds:x,y;...": clicks at those times after the main
@@ -161,7 +186,9 @@ final class GameActivityRunner {
         // as a click is: a UI takes the press on what the pointer is over.
         // "seconds:key=scancode" presses a key for 150 ms instead,
         // "seconds:wheel=notches" turns the mouse wheel, and
-        // "seconds:look=dx,dy" moves the mouse by that much.
+        // "seconds:look=dx,dy" moves the mouse by that much, and
+        // "seconds:text=words" types them, as SDL's text input delivers typing.
+        var debugTexts: [String] = []
         var taps: [(at: Double, x: Float, y: Float, kind: Int)] = (getenv("MEAD_DEBUG_TAPS").map { String(cString: $0) } ?? "")
             .split(separator: ";").flatMap { item -> [(at: Double, x: Float, y: Float, kind: Int)] in
                 let halves = item.split(separator: ":", maxSplits: 1)
@@ -171,6 +198,10 @@ final class GameActivityRunner {
                 }
                 if halves[1].hasPrefix("wheel="), let notches = Float(halves[1].dropFirst(6)) {
                     return [(at, notches, 0, 5)]
+                }
+                if halves[1].hasPrefix("text=") {
+                    debugTexts.append(String(halves[1].dropFirst(5)))
+                    return [(at, Float(debugTexts.count - 1), 0, 7)]
                 }
                 if halves[1].hasPrefix("look=") {
                     let delta = halves[1].dropFirst(5).split(separator: ",").compactMap { Float($0) }
@@ -189,6 +220,13 @@ final class GameActivityRunner {
         while running {
             while looper.pollOnce(timeout: 0, outFd: nil, outEvents: nil, outData: nil) == ALOOPER_POLL_CALLBACK {}
             activity.runUiCallbacks()
+            // Typing, likewise: on while the game has a text box open.
+            let ownBoxOpen = JavaMinecraftActivity.textBox.isActive
+            input.textInputTakesReturn = ownBoxOpen
+            if (textInput.isActive || ownBoxOpen) != input.textInputActive {
+                input.textInputActive = textInput.isActive || ownBoxOpen
+                _ = input.textInputActive ? SDL.startTextInput(sdlWindow) : SDL.stopTextInput(sdlWindow)
+            }
             // Pointer capture, asked for on the game's thread, applied on SDL's.
             let wantsCapture = JavaMinecraftActivity.cursorLocked
             if wantsCapture != input.pointerCaptured {
@@ -202,7 +240,7 @@ final class GameActivityRunner {
                 clock_gettime(CLOCK_MONOTONIC, &now)
                 if Double(now.tv_sec - started.tv_sec) + Double(now.tv_nsec - started.tv_nsec) / 1e9 >= tap.at {
                     taps.removeFirst()
-                    writeError("debug \(["move", "down", "up", "key down", "key up", "wheel", "look"][tap.kind]) at \(tap.x),\(tap.y)")
+                    writeError("debug \(["move", "down", "up", "key down", "key up", "wheel", "look", "text"][tap.kind]) at \(tap.x),\(tap.y)")
                     do {
                         var click = mead_sdl_event()
                         switch tap.kind {
@@ -221,6 +259,14 @@ final class GameActivityRunner {
                             click.key.type = UInt32(tap.kind == 3 ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
                             click.key.scancode = UInt32(tap.x)
                             click.key.down = tap.kind == 3
+                        case 7:
+                            writeError("debug text box open: \(textInput.isActive)")
+                            debugTexts[Int(tap.x)].withCString { text in
+                                click.text.type = UInt32(MEAD_SDL_EVENT_TEXT_INPUT)
+                                click.text.text = text
+                                input.handle(click, windowWidth: Float(window.pixelWidth), windowHeight: Float(window.pixelHeight))
+                            }
+                            continue
                         case 6:
                             click.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION)
                             click.motion.x = Float(window.pixelWidth) / 2
