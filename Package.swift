@@ -9,8 +9,9 @@ let package = Package(
         .executable(name: "mead", targets: ["MeadLoader"]),
         // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
         .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
-        // The fake JVM: stands in for libart.so.
-        .library(name: "MeadJNI", type: .dynamic, targets: ["MeadJNI"]),
+        // Stands in for libandroid.so and libart.so: one library, as there
+        // is to be one JVM however many things need it.
+        .library(name: "MeadAndroid", type: .dynamic, targets: ["MeadAndroid"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
@@ -55,6 +56,26 @@ let package = Package(
         .target(
             name: "MeadJNI",
             dependencies: ["CMeadJNI", "MeadInterface", "MeadMacros"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // SDL3, found at run time.
+        .target(name: "CMeadWindow"),
+        .target(name: "MeadWindow", dependencies: ["CMeadWindow"]),
+        // The Android framework's classes, on the fake JVM.
+        .target(
+            name: "MeadJava",
+            dependencies: ["MeadJNI", "MeadInterface"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .target(name: "CMeadAndroid", dependencies: ["CMeadJNI"]),
+        .target(
+            name: "MeadAndroid",
+            dependencies: ["CMeadAndroid", "MeadJNI", "MeadJava", "MeadWindow", "MeadInterface"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "MeadAndroidTests",
+            dependencies: ["MeadAndroid"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
