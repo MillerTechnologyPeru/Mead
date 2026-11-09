@@ -1,7 +1,7 @@
 /// Makes a `JavaObject` subclass a Java class: registers what `@JavaMethod`
 /// and `@JavaField` mark, with signatures derived from the Swift types.
-@attached(member, names: named(javaClassName), named(javaSuperclassType), named(javaMembers))
-public macro JavaClass(_ name: String) = #externalMacro(module: "MeadMacros", type: "JavaClassMacro")
+@attached(member, names: named(javaClassName), named(javaSuperclassType), named(javaInterfaceNames), named(javaMembers))
+public macro JavaClass(_ name: String, implements: [String] = []) = #externalMacro(module: "MeadMacros", type: "JavaClassMacro")
 
 /// Marks a method or initializer as callable from JNI. `name` defaults to the
 /// Swift name, or `<init>` for an initializer; `signature` is only needed
