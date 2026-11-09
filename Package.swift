@@ -89,6 +89,12 @@ let package = Package(
             dependencies: ["MeadCrypto", "MeadJNI", "MeadInterface"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        // Unity's Java player, for games built with Unity 6.
+        .target(
+            name: "MeadUnity",
+            dependencies: ["MeadJNI", "MeadJava"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // Minecraft's own Java classes: its activity, and its store's license check.
         .target(
             name: "MeadMinecraft",
@@ -107,7 +113,7 @@ let package = Package(
         .target(name: "CMeadAndroid", dependencies: ["CMeadJNI", "MeadInterface"]),
         .target(
             name: "MeadAndroid",
-            dependencies: ["CMeadAndroid", "MeadJNI", "MeadJava", "MeadMinecraft", "MeadWindow", "MeadInterface"],
+            dependencies: ["CMeadAndroid", "MeadGooglePlay", "MeadJNI", "MeadJava", "MeadMinecraft", "MeadUnity", "MeadWindow", "MeadInterface"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
@@ -117,7 +123,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MeadAndroidTests",
-            dependencies: ["MeadAndroid", "MeadCrypto", "MeadMinecraft", "CMeadWindow"],
+            dependencies: ["MeadAndroid", "MeadCrypto", "MeadMinecraft", "MeadUnity", "CMeadWindow"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
