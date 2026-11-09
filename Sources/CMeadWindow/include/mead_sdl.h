@@ -30,6 +30,7 @@ enum {
 };
 
 #define MEAD_SDL_WINDOW_RESIZABLE 0x20ull
+#define MEAD_SDL_WINDOW_VULKAN 0x10000000ull
 
 #define MEAD_SDL_PROP_X11_DISPLAY "SDL.window.x11.display"
 #define MEAD_SDL_PROP_X11_WINDOW "SDL.window.x11.window"
