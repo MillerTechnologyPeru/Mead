@@ -1,0 +1,105 @@
+import MeadJNI
+
+@JavaClass("android/content/res/AssetManager")
+public final class JavaAssetManager: JavaObject {}
+
+@JavaClass("android/content/Context")
+open class JavaContext: JavaObject {
+    private let assets = JavaAssetManager()
+
+    @JavaMethod("getAssets") public func getAssets() -> JavaAssetManager? { assets }
+    @JavaMethod("getPackageName") public func getPackageName() -> String? { AndroidEnvironment.packageName }
+    @JavaMethod("getApplicationContext") public func getApplicationContext() -> JavaContext? { self }
+    @JavaMethod("getFilesDir") public func getFilesDir() -> JavaFile? { JavaFile(path: AndroidEnvironment.filesDirectory) }
+    @JavaMethod("getCacheDir") public func getCacheDir() -> JavaFile? { JavaFile(path: AndroidEnvironment.cacheDirectory) }
+
+    @JavaMethod("getExternalFilesDir", signature: "(Ljava/lang/String;)Ljava/io/File;")
+    public func getExternalFilesDir(_ type: String?) -> JavaFile? {
+        JavaFile(path: AndroidEnvironment.filesDirectory)
+    }
+
+    /// Which services exist is up to each game's compatibility classes.
+    @JavaMethod("getSystemService", signature: "(Ljava/lang/String;)Ljava/lang/Object;")
+    public func getSystemService(_ name: String?) -> JavaObject? {
+        JavaRuntime.shared.problemOnceForFramework("Context.getSystemService(\(name ?? "null")) is not implemented")
+        return nil
+    }
+}
+
+@JavaClass("android/content/ContextWrapper")
+open class JavaContextWrapper: JavaContext {}
+
+@JavaClass("android/app/Activity")
+open class JavaActivity: JavaContextWrapper {
+    /// What happens when native code asks to finish; set by the runner.
+    public var onFinish: (() -> Void)?
+
+    @JavaMethod("finish") public func finish() {
+        onFinish?()
+    }
+}
+
+@JavaClass("android/app/NativeActivity")
+public final class JavaNativeActivity: JavaActivity {}
+
+@JavaClass("android/view/Surface")
+public final class JavaSurface: JavaObject {
+    /// The ANativeWindow behind it, held for as long as the surface is.
+    public var nativeWindow: UnsafeMutableRawPointer?
+
+    public init(nativeWindow: UnsafeMutableRawPointer?) {
+        self.nativeWindow = nativeWindow
+        super.init()
+    }
+}
+
+@JavaClass("android/os/Build")
+public final class JavaBuild: JavaObject {
+    @JavaField("BOARD") public static var board: String? = "mead"
+    @JavaField("BRAND") public static var brand: String? = "mead"
+    @JavaField("CPU_ABI") public static var cpuABI: String? = "arm64-v8a"
+    @JavaField("DEVICE") public static var device: String? = "mead"
+    @JavaField("FINGERPRINT") public static var fingerprint: String? = ""
+    @JavaField("HARDWARE") public static var hardware: String? = "mead"
+    @JavaField("ID") public static var id: String? = ""
+    @JavaField("MANUFACTURER") public static var manufacturer: String? = "mead"
+    @JavaField("MODEL") public static var model: String? = "Mead"
+    @JavaField("PRODUCT") public static var product: String? = "mead"
+    @JavaField("TAGS") public static var tags: String? = "release-keys"
+    @JavaField("TYPE") public static var type: String? = "user"
+
+    /// Takes what system properties say, so that the two views of the
+    /// device agree.
+    static func refresh() {
+        board = AndroidEnvironment.property("ro.product.board", default: "mead")
+        brand = AndroidEnvironment.property("ro.product.brand", default: "mead")
+        cpuABI = AndroidEnvironment.property("ro.product.cpu.abi", default: "arm64-v8a")
+        device = AndroidEnvironment.property("ro.product.device", default: "mead")
+        fingerprint = AndroidEnvironment.property("ro.build.fingerprint", default: "")
+        hardware = AndroidEnvironment.property("ro.hardware", default: "mead")
+        id = AndroidEnvironment.property("ro.build.id", default: "")
+        manufacturer = AndroidEnvironment.property("ro.product.manufacturer", default: "mead")
+        model = AndroidEnvironment.property("ro.product.model", default: "Mead")
+        product = AndroidEnvironment.property("ro.product.name", default: "mead")
+        tags = AndroidEnvironment.property("ro.build.tags", default: "release-keys")
+        type = AndroidEnvironment.property("ro.build.type", default: "user")
+    }
+}
+
+@JavaClass("android/os/Build$VERSION")
+public final class JavaBuildVersion: JavaObject {
+    @JavaField("SDK_INT") public static var sdkInt: Int32 = 33
+    @JavaField("SDK") public static var sdk: String? = "33"
+    @JavaField("RELEASE") public static var release: String? = "13"
+    @JavaField("CODENAME") public static var codename: String? = "REL"
+    @JavaField("INCREMENTAL") public static var incremental: String? = "1"
+
+    static func refresh() {
+        let level = AndroidEnvironment.property("ro.build.version.sdk", default: "33")
+        sdk = level
+        sdkInt = Int32(level) ?? 33
+        release = AndroidEnvironment.property("ro.build.version.release", default: "13")
+        codename = AndroidEnvironment.property("ro.build.version.codename", default: "REL")
+        incremental = AndroidEnvironment.property("ro.build.version.incremental", default: "1")
+    }
+}
