@@ -17,6 +17,8 @@ public enum SDL {
     public nonisolated(unsafe) static var getPointerProperty: (@convention(c) (UInt32, UnsafePointer<CChar>, Pointer?) -> Pointer?)!
     public nonisolated(unsafe) static var getNumberProperty: (@convention(c) (UInt32, UnsafePointer<CChar>, Int64) -> Int64)!
     public nonisolated(unsafe) static var waitEventTimeout: (@convention(c) (EventPointer?, Int32) -> Bool)!
+    public nonisolated(unsafe) static var openGamepad: (@convention(c) (UInt32) -> Pointer?)!
+    public nonisolated(unsafe) static var closeGamepad: (@convention(c) (Pointer?) -> Void)!
     public nonisolated(unsafe) static var pushEvent: (@convention(c) (EventPointer?) -> Bool)!
 
     public static var lastError: String {
@@ -52,6 +54,8 @@ public enum SDL {
         getPointerProperty = bind("SDL_GetPointerProperty")
         getNumberProperty = bind("SDL_GetNumberProperty")
         waitEventTimeout = bind("SDL_WaitEventTimeout")
+        openGamepad = bind("SDL_OpenGamepad")
+        closeGamepad = bind("SDL_CloseGamepad")
         pushEvent = bind("SDL_PushEvent")
         return complete
     }
