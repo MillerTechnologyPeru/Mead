@@ -1,4 +1,5 @@
 import Glibc
+import MeadInterface
 import MeadJNI
 import MeadJava
 import MeadWindow
@@ -33,6 +34,68 @@ public final class NativeWindow {
     var pointer: UnsafeMutableRawPointer {
         Unmanaged.passUnretained(self).toOpaque()
     }
+
+    /// The window the running app was given.
+    nonisolated(unsafe) static var current: NativeWindow?
+
+    // On Wayland EGL draws to a wl_egl_window, which SDL only makes for its
+    // own OpenGL windows; Mead's window is left to whichever API the game
+    // picks, so it makes its own.
+    private var waylandEGLWindow: UnsafeMutableRawPointer?
+
+    private static let waylandEGL = dlopen("libwayland-egl.so.1", RTLD_NOW)
+
+    /// What the host calls this window.
+    func describe(_ out: UnsafeMutablePointer<mead_native_window>) -> Bool {
+        out.pointee = mead_native_window()
+        guard let handle else { return false }
+        let properties = SDL.getWindowProperties(handle)
+        if let display = SDL.getPointerProperty(properties, MEAD_SDL_PROP_X11_DISPLAY, nil) {
+            out.pointee.kind = UInt32(MEAD_NATIVE_WINDOW_X11)
+            out.pointee.display = display
+            out.pointee.window = UInt(SDL.getNumberProperty(properties, MEAD_SDL_PROP_X11_WINDOW, 0))
+            return true
+        }
+        if let display = SDL.getPointerProperty(properties, MEAD_SDL_PROP_WAYLAND_DISPLAY, nil),
+           let surface = SDL.getPointerProperty(properties, MEAD_SDL_PROP_WAYLAND_SURFACE, nil) {
+            out.pointee.kind = UInt32(MEAD_NATIVE_WINDOW_WAYLAND)
+            out.pointee.display = display
+            out.pointee.window = UInt(bitPattern: surface)
+            out.pointee.egl_window = SDL.getPointerProperty(properties, MEAD_SDL_PROP_WAYLAND_EGL_WINDOW, nil)
+                ?? makeWaylandEGLWindow(surface)
+            return true
+        }
+        return false
+    }
+
+    private func makeWaylandEGLWindow(_ surface: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
+        if let waylandEGLWindow {
+            return waylandEGLWindow
+        }
+        typealias Create = @convention(c) (UnsafeMutableRawPointer, Int32, Int32) -> UnsafeMutableRawPointer?
+        guard let library = NativeWindow.waylandEGL, let symbol = dlsym(library, "wl_egl_window_create") else { return nil }
+        let size = windowPixels
+        waylandEGLWindow = unsafeBitCast(symbol, to: Create.self)(surface, size.width, size.height)
+        return waylandEGLWindow
+    }
+
+    private var windowPixels: (width: Int32, height: Int32) { windowSize }
+
+    /// Tells a Wayland EGL window the window's new size; X11 needs no telling.
+    func windowWasResized() {
+        typealias Resize = @convention(c) (UnsafeMutableRawPointer, Int32, Int32, Int32, Int32) -> Void
+        guard let waylandEGLWindow, let library = NativeWindow.waylandEGL,
+              let symbol = dlsym(library, "wl_egl_window_resize") else { return }
+        let size = windowPixels
+        unsafeBitCast(symbol, to: Resize.self)(waylandEGLWindow, size.width, size.height, 0, 0)
+    }
+}
+
+@_cdecl("mead_android_window_native")
+public func meadAndroidWindowNative(_ pointer: UnsafeMutableRawPointer?, _ out: UnsafeMutablePointer<mead_native_window>) -> Bool {
+    let target = pointer.map { Unmanaged<NativeWindow>.fromOpaque($0).takeUnretainedValue() } ?? NativeWindow.current
+    guard let target else { return false }
+    return target.describe(out)
 }
 
 private func window(_ pointer: UnsafeMutableRawPointer) -> NativeWindow {
