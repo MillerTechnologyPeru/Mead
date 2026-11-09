@@ -136,6 +136,11 @@ public final class JavaSystem: JavaObject {
         try load(library: path)
     }
 
+    /// As the app's Java would: `lib<name>.so`, and its JNI_OnLoad.
+    public static func loadNamed(_ name: String) throws {
+        try load("lib\(name).so")
+    }
+
     private static func load(_ file: String) throws {
         try load(library: file)
     }
