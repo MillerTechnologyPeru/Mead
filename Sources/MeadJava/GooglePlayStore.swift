@@ -71,7 +71,8 @@ public final class JavaStore: JavaObject {
         let result: LicenseResult
         if let directory = AndroidEnvironment.gameDirectory, let publicKey, let manifest = AndroidManifest(path: "\(directory)/AndroidManifest.xml") {
             result = GooglePlayLicense().check(account: GoogleAccount.load(), packageName: manifest.packageName,
-                                               versionCode: manifest.versionCode, publicKey: publicKey)
+                                               versionCode: manifest.versionCode, publicKey: publicKey,
+                                               cache: .standard(for: manifest.packageName))
         } else {
             result = GooglePlayLicense().check(account: nil, packageName: "", versionCode: 0, publicKey: "")
         }
