@@ -8,7 +8,7 @@ import MeadJNI
 
 /// Runs `body` on a thread of its own: how an answer the real platform gives
 /// asynchronously reaches the game after the call that asked has returned.
-func runOnNewThread(_ body: @escaping () -> Void) {
+public func runOnNewThread(_ body: @escaping () -> Void) {
     final class Box {
         let body: () -> Void
         init(_ body: @escaping () -> Void) { self.body = body }
