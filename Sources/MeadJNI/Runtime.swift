@@ -77,7 +77,7 @@ public final class JavaRuntime {
 
     private init() {}
 
-    func trace(_ text: @autoclosure () -> String) {
+    public func trace(_ text: @autoclosure () -> String) {
         if tracing {
             writeStandardError("mead(jni): \(text())\n")
         }
