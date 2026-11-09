@@ -8,6 +8,7 @@ open class JavaContext: JavaObject {
     private let assets = JavaAssetManager()
 
     @JavaMethod("getAssets") public func getAssets() -> JavaAssetManager? { assets }
+    @JavaMethod("getClassLoader") public func getClassLoader() -> JavaClassLoader? { JavaClassLoader() }
     @JavaMethod("getPackageName") public func getPackageName() -> String? { AndroidEnvironment.packageName }
     @JavaMethod("getApplicationContext") public func getApplicationContext() -> JavaContext? { self }
     @JavaMethod("getFilesDir") public func getFilesDir() -> JavaFile? { JavaFile(path: AndroidEnvironment.filesDirectory) }
@@ -37,6 +38,16 @@ open class JavaActivity: JavaContextWrapper {
     @JavaMethod("finish") public func finish() {
         onFinish?()
     }
+}
+
+@JavaClass("com/google/androidgamesdk/GameActivity")
+open class JavaGameActivity: JavaActivity {
+    private let noInsets = JavaInsets()
+
+    @JavaMethod("setWindowFlags") public func setWindowFlags(_ add: Int32, _ remove: Int32) {}
+    @JavaMethod("setImeEditorInfoFields") public func setImeEditorInfoFields(_ type: Int32, _ action: Int32, _ options: Int32) {}
+    @JavaMethod("getWindowInsets") public func getWindowInsets(_ type: Int32) -> JavaInsets? { noInsets }
+    @JavaMethod("getWaterfallInsets") public func getWaterfallInsets() -> JavaInsets? { noInsets }
 }
 
 @JavaClass("android/app/NativeActivity")
