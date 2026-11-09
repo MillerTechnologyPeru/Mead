@@ -181,9 +181,26 @@ static void skip_functions(mead_image *image) {
 // MEAD_DEBUG_PATCH=library:offset:word,word — overwrites instructions in a
 // bound image, for getting past one known fault to see what comes after it.
 // A debugging aid only: nothing runs it unless the variable is set.
-static void apply_debug_patch(mead_image *image, const char *patch) {
-    if (!patch)
+static void apply_one_debug_patch(mead_image *image, const char *patch);
+
+// Several patches may be given, separated by ';'.
+static void apply_debug_patch(mead_image *image, const char *patches) {
+    if (!patches)
         return;
+    for (const char *at = patches; at && *at; ) {
+        const char *end = strchr(at, ';');
+        size_t length = end ? (size_t)(end - at) : strlen(at);
+        char one[512];
+        if (length < sizeof(one)) {
+            memcpy(one, at, length);
+            one[length] = 0;
+            apply_one_debug_patch(image, one);
+        }
+        at = end ? end + 1 : NULL;
+    }
+}
+
+static void apply_one_debug_patch(mead_image *image, const char *patch) {
     const char *colon = strchr(patch, ':');
     if (!colon || !image->soname || strncmp(image->soname, patch, (size_t)(colon - patch)) != 0)
         return;
