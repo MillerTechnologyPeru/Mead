@@ -21,7 +21,13 @@ typedef struct audio_api {
     bool (*clear)(void *stream);
     bool (*set_gain)(void *stream, float gain);
     const char *(*error)(void);
+    uint32_t (*stream_device)(void *stream);
+    bool (*device_format)(uint32_t device, mead_sdl_audio_spec *spec, int *sample_frames);
 } audio_api;
+
+// How many frames, at `rate`, the device behind a stream takes at a time: its
+// buffer, which is what Android calls a burst. 0 if SDL can't say.
+int audio_device_frames(void *stream, int rate);
 
 // SDL's audio functions, with its audio subsystem running; NULL if it can't.
 const audio_api *audio_backend(void);
