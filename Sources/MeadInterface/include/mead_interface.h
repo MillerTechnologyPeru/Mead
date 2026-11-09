@@ -101,6 +101,26 @@ typedef struct mead_image_info {
 typedef void (*mead_provider_image_fn)(const mead_image_info *image);
 #define MEAD_PROVIDER_IMAGE_INIT_SYMBOL "mead_provider_image_init"
 
+// What the host's windowing system calls an ANativeWindow, so that the EGL
+// and Vulkan providers can reach it. libMeadAndroid.so exports
+// mead_android_window_native to fill one in.
+enum {
+    MEAD_NATIVE_WINDOW_NONE = 0,
+    MEAD_NATIVE_WINDOW_X11 = 1,
+    MEAD_NATIVE_WINDOW_WAYLAND = 2,
+};
+
+typedef struct mead_native_window {
+    uint32_t kind;
+    void *display;       // X11's Display, or the wl_display
+    uintptr_t window;    // X11's Window, or the wl_surface
+    void *egl_window;    // Wayland's wl_egl_window
+} mead_native_window;
+
+// `window` is an ANativeWindow, or NULL for the one the app was given.
+typedef bool (*mead_android_window_native_fn)(void *window, mead_native_window *out);
+#define MEAD_ANDROID_WINDOW_NATIVE_SYMBOL "mead_android_window_native"
+
 // Providers may export this function. The loader calls it, while binding,
 // for a symbol the provider does not define as an ELF symbol; it returns the
 // symbol's address, or NULL. Only a provider's own ELF symbols are taken
