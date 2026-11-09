@@ -11,8 +11,33 @@ private func memoryBytes(_ name: Int32) -> Int64 {
     Int64(sysconf(name)) * Int64(sysconf(Int32(_SC_PAGESIZE)))
 }
 
-private func emptyStrings() -> JavaObject? {
-    JavaRuntime.shared.newObjectArray(elementClass: "java/lang/String", count: 0)
+/// The host's IPv4 addresses, and where each interface broadcasts.
+private func ipv4Interfaces() -> (addresses: [String], broadcasts: [String]) {
+    var head: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&head) == 0 else { return ([], []) }
+    defer { freeifaddrs(head) }
+
+    func text(_ address: UnsafeMutablePointer<sockaddr>?) -> String? {
+        guard let address, Int32(address.pointee.sa_family) == AF_INET else { return nil }
+        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        return address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { inet in
+            var value = inet.pointee.sin_addr
+            return inet_ntop(AF_INET, &value, &buffer, socklen_t(buffer.count)).map { String(cString: $0) }
+        }
+    }
+
+    var addresses: [String] = [], broadcasts: [String] = []
+    var at = head
+    while let current = at {
+        at = current.pointee.ifa_next
+        let flags = current.pointee.ifa_flags
+        guard flags & 0x8 == 0, flags & 0x1 != 0, let address = text(current.pointee.ifa_addr) else { continue } // up, not loopback
+        addresses.append(address)
+        if flags & 0x2 != 0, let broadcast = text(current.pointee.ifa_ifu.ifu_broadaddr) {
+            broadcasts.append(broadcast)
+        }
+    }
+    return (addresses, broadcasts)
 }
 
 @JavaClass("java/lang/ClassLoader")
@@ -70,6 +95,15 @@ public final class JavaWindowManager: JavaObject {
     private let display = JavaDisplay()
     @JavaMethod("getDefaultDisplay") public func getDefaultDisplay() -> JavaDisplay? { display }
 }
+
+@JavaClass("com/google/androidgamesdk/gametextinput/InputConnection")
+public final class JavaTextInputConnection: JavaObject {
+    @JavaMethod("setSoftKeyboardActive") public func setSoftKeyboardActive(_ active: Bool, _ flags: Int32) {}
+    @JavaMethod("restartInput") public func restartInput() {}
+}
+
+@JavaClass("com/mojang/minecraftpe/NetworkMonitor")
+public final class JavaNetworkMonitor: JavaObject {}
 
 @JavaClass("com/mojang/minecraftpe/CrashManager")
 public final class JavaCrashManager: JavaObject {}
@@ -132,32 +166,89 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     private let thermal = JavaThermalMonitor()
     private let started = JavaSystem.nanoTime()
 
-    // Natives the game wants run on its main thread.
+    // Natives the game wants run on its main thread. The game passes a closure
+    // on its own stack and reads what it wrote as soon as this returns, so the
+    // caller has to wait for it, as it would on Android.
+    private final class UiCallback {
+        let callback: Int64
+        var finished = false
+        init(_ callback: Int64) { self.callback = callback }
+    }
+
     private let uiLock: UnsafeMutablePointer<pthread_mutex_t> = {
         let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
         pthread_mutex_init(lock, nil)
         return lock
     }()
-    private var uiCallbacks: [Int64] = []
+    private let uiFinished: UnsafeMutablePointer<pthread_cond_t> = {
+        let condition = UnsafeMutablePointer<pthread_cond_t>.allocate(capacity: 1)
+        pthread_cond_init(condition, nil)
+        return condition
+    }()
+    private var uiCallbacks: [UiCallback] = []
+    private var uiThread: pthread_t?
 
     @JavaMethod("runNativeCallbackOnUiThread") public func runNativeCallbackOnUiThread(_ callback: Int64) {
         pthread_mutex_lock(uiLock)
-        uiCallbacks.append(callback)
+        // With no main thread turning, waiting for one would never end: that
+        // thread may itself be waiting for this one, in a lifecycle call.
+        guard let uiThread, pthread_equal(uiThread, pthread_self()) == 0 else {
+            pthread_mutex_unlock(uiLock)
+            runNativeCallback(callback)
+            return
+        }
+        let entry = UiCallback(callback)
+        uiCallbacks.append(entry)
+        while !entry.finished {
+            pthread_cond_wait(uiFinished, uiLock)
+        }
         pthread_mutex_unlock(uiLock)
     }
 
-    /// The callbacks waiting for the main thread, for it to run.
-    public func takeUiCallbacks() -> [Int64] {
+    private func runNativeCallback(_ callback: Int64) {
+        var value = jvalue()
+        value.j = callback
+        JavaRuntime.shared.attachCurrentThread().call("com/mojang/minecraftpe/MainActivity", "nativeRunNativeCallbackOnUiThread", "(J)V", on: self, [value])
+    }
+
+    /// The calling thread starts answering callbacks, through `runUiCallbacks`.
+    public func beginUiCallbacks() {
         pthread_mutex_lock(uiLock)
-        defer { pthread_mutex_unlock(uiLock) }
+        uiThread = pthread_self()
+        pthread_mutex_unlock(uiLock)
+    }
+
+    /// Runs the callbacks waiting for the main thread, and lets their callers go.
+    public func runUiCallbacks() {
+        pthread_mutex_lock(uiLock)
         let taken = uiCallbacks
         uiCallbacks.removeAll()
-        return taken
+        pthread_mutex_unlock(uiLock)
+        guard !taken.isEmpty else { return }
+        for entry in taken {
+            runNativeCallback(entry.callback)
+        }
+        pthread_mutex_lock(uiLock)
+        for entry in taken {
+            entry.finished = true
+        }
+        pthread_cond_broadcast(uiFinished)
+        pthread_mutex_unlock(uiLock)
+    }
+
+    /// The main thread stops answering; later callbacks run where they're made.
+    public func endUiCallbacks() {
+        pthread_mutex_lock(uiLock)
+        uiThread = nil
+        pthread_mutex_unlock(uiLock)
+        runUiCallbacks()
     }
 
     @JavaMethod("getInternalStoragePath") public func getInternalStoragePath() -> String? { AndroidEnvironment.filesDirectory }
     @JavaMethod("getExternalStoragePath") public func getExternalStoragePath() -> String? { AndroidEnvironment.externalDirectory }
-    @JavaMethod("getLegacyExternalStoragePath") public func getLegacyExternalStoragePath(_ name: String?) -> String? { AndroidEnvironment.externalDirectory }
+    // There was never an older install: empty is how to say so. Given a path,
+    // even one that doesn't exist, the game offers to move its files from it.
+    @JavaMethod("getLegacyExternalStoragePath") public func getLegacyExternalStoragePath(_ name: String?) -> String? { "" }
     @JavaMethod("getLegacyDeviceID") public func getLegacyDeviceID() -> String? { "" }
     @JavaMethod("createUUID") public func createUUID() -> String? { JavaUUID.randomUUID()?.javaToString() }
     @JavaMethod("setCachedDeviceId") public func setCachedDeviceId(_ id: String?) {}
@@ -171,7 +262,9 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     @JavaMethod("getDeviceModel") public func getDeviceModel() -> String? { JavaBuild.model }
     @JavaMethod("getLocale") public func getLocale() -> String? { "en_US" }
     @JavaMethod("isTablet") public func isTablet() -> Bool { true }
-    @JavaMethod("isChromebook") public func isChromebook() -> Bool { false }
+    // A Linux machine with a keyboard and mouse is what Android calls a
+    // Chromebook, and the game only takes a mouse from one.
+    @JavaMethod("isChromebook") public func isChromebook() -> Bool { true }
     @JavaMethod("hasWriteExternalStoragePermission") public func hasWriteExternalStoragePermission() -> Bool { true }
     @JavaMethod("hasReadMediaImagesPermission") public func hasReadMediaImagesPermission() -> Bool { true }
     @JavaMethod("hasHardwareKeyboard") public func hasHardwareKeyboard() -> Bool { true }
@@ -192,7 +285,7 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     @JavaMethod("tick") public func tick() {}
     @JavaMethod("vibrate") public func vibrate(_ milliseconds: Int32) {}
     @JavaMethod("quit") public func quit() { exit(0) }
-    @JavaMethod("getBroadcastAddresses", signature: "()[Ljava/lang/String;") public func getBroadcastAddresses() -> JavaObject? { emptyStrings() }
-    @JavaMethod("getIPAddresses", signature: "()[Ljava/lang/String;") public func getIPAddresses() -> JavaObject? { emptyStrings() }
+    @JavaMethod("getBroadcastAddresses", signature: "()[Ljava/lang/String;") public func getBroadcastAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().broadcasts) }
+    @JavaMethod("getIPAddresses", signature: "()[Ljava/lang/String;") public func getIPAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().addresses) }
     @JavaMethod("calculateAvailableDiskFreeSpace") public func calculateAvailableDiskFreeSpace(_ path: String?) -> Int64 { 1 << 34 }
 }
