@@ -69,6 +69,9 @@ public final class JavaRuntime {
     /// Finds a symbol in the loaded libraries, for natives bound by name.
     public var nativeLookup: ((String) -> UnsafeMutableRawPointer?)?
 
+    /// Makes the object Class.getClassLoader answers with.
+    public var classLoaderFactory: (() -> JavaObject?)?
+
     /// The process's JavaVM.
     public var vm: UnsafeMutablePointer<JavaVM?> { javaVM }
 
@@ -239,6 +242,16 @@ public final class JavaRuntime {
             classesByName[name] = definition
             return definition
         }
+    }
+
+    /// FindClass, for the framework's ClassLoader.
+    public func findClassPublic(named name: String) -> JavaClass? {
+        findClass(named: name)
+    }
+
+    /// An empty-or-not array of references, for framework methods to return.
+    public func newObjectArray(elementClass: String, count: Int) -> JavaObject? {
+        findClass(named: "[L\(elementClass);").map { JavaObjectArray(count: count, initial: nil, type: $0) }
     }
 
     func allClasses() -> [JavaClass] {
