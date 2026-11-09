@@ -23,6 +23,9 @@ void *mead_load_library(const char *path, char **error);
 // missing.
 void *mead_find_symbol(void *handle, const char *name);
 
+// Prints where a crash happened, on standard error, from now on.
+void mead_install_crash_report(void);
+
 // Lays out TLS for, binds and makes runnable every image not yet done, and
 // runs nothing.
 void mead_bind_loaded(void);
