@@ -182,6 +182,13 @@ private nonisolated(unsafe) var tlsBump: (@convention(c) () -> Int32)?
     #expect(state.pointee == 42)
 }
 
+@Test func aSkippedFunctionReturnsAtOnce() {
+    guard let handle = fixture("libfixture_basic.so") else { return }
+    let skipped = unsafeBitCast(mead_find_symbol(handle, "_ZN9Microsoft12Applications6Events19TelemetrySystemBase5startEv"),
+                                to: (@convention(c) () -> Int).self)
+    #expect(skipped() == 0)
+}
+
 @Test func packedAndRelativeRelocationsBindTheSame() {
     for name in ["libfixture_packed.so", "libfixture_relr.so"] {
         guard let handle = fixture(name) else { continue }
