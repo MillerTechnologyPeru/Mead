@@ -162,6 +162,21 @@ public final class JavaThread {
 
     // MARK: Calls
 
+    /// Calls a method by name from Swift, for what plays the part of the
+    /// Java code a game expects to be called by. Handles in `arguments` are
+    /// the caller's.
+    @discardableResult
+    public func call(_ className: String, _ name: String, _ signature: String, isStatic: Bool = false,
+                     on receiver: JavaObject?, _ arguments: [jvalue] = []) -> jvalue {
+        var result = jvalue()
+        guard let type = JavaRuntime.shared.findClass(named: className),
+              let method = type.method(named: name, signature: signature, isStatic: isStatic) else { return result }
+        arguments.withUnsafeBufferPointer {
+            run(method, receiver: receiver, arguments: $0.baseAddress, result: &result)
+        }
+        return result
+    }
+
     /// Runs a method, whichever way it is implemented. Reference results are
     /// local references of the frame the caller is in.
     func run(_ method: JavaMethod, receiver: JavaObject?, arguments: UnsafePointer<jvalue>?, result: UnsafeMutablePointer<jvalue>) {
