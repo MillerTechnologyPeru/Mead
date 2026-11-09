@@ -3,6 +3,7 @@ import Glibc
 import MeadInterface
 import MeadJNI
 import MeadJava
+import MeadMinecraft
 import MeadWindow
 
 @_cdecl("mead_provider_startup")
@@ -11,7 +12,7 @@ public func meadAndroidProviderStartup(_ info: UnsafePointer<mead_startup_info>)
     let lookup = info.pointee.lookup_symbol
     JavaRuntime.shared.nativeLookup = { name in name.withCString { lookup?(nil, $0) } }
     JavaRuntime.shared.attachCurrentThread()
-    JavaFramework.register()
+    MinecraftFramework.register()
 
     let directory: String
     if let data = info.pointee.data_dir {
