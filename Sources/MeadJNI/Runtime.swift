@@ -264,6 +264,16 @@ public final class JavaRuntime {
         return array
     }
 
+    /// An int[] holding `values`.
+    public func newIntArray(_ values: [Int32]) -> JavaObject? {
+        guard let type = findClass(named: "[I") else { return nil }
+        let array = JavaPrimitiveArray(kind: UInt8(ascii: "I"), count: values.count, type: type)
+        values.withUnsafeBytes { source in
+            if let base = source.baseAddress { array.storage.copyMemory(from: base, byteCount: source.count) }
+        }
+        return array
+    }
+
     /// A String[] holding `strings`.
     public func newStringArray(_ strings: [String]) -> JavaObject? {
         guard let array = newObjectArray(elementClass: "java/lang/String", count: strings.count) as? JavaObjectArray else { return nil }
