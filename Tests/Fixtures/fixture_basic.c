@@ -52,3 +52,8 @@ int fixture_weak_missing_is_null(void) {
 int fixture_interposed(void) {
     return 2;
 }
+
+// Named as a function mead's loader makes return at once.
+__attribute__((used, visibility("default")))
+long fixture_skipped(void) __asm__("_ZN9Microsoft12Applications6Events19TelemetrySystemBase5startEv");
+long fixture_skipped(void) { return fixture_state + 7; }
