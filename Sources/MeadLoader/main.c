@@ -124,5 +124,17 @@ int main(int argc, char **argv) {
         fflush(stdout);
         return result == 0 ? 0 : 1;
     }
+
+    // A NativeActivity's entry point: run it as Android would.
+    void *on_create = mead_find_symbol(image, "ANativeActivity_onCreate");
+    if (on_create) {
+        int (*run)(void *, const char *) =
+            (int (*)(void *, const char *))mead_find_symbol(NULL, "mead_android_run_activity");
+        if (!run) {
+            fprintf(stderr, "mead: no provider can run an activity\n");
+            return 1;
+        }
+        return run(on_create, target);
+    }
     return 0;
 }
