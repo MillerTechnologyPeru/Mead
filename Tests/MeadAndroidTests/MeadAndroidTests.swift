@@ -331,3 +331,25 @@ private final class InputRecorder {
     #expect(JavaKeyEvent(action: 0, keyCode: 0, scanCode: 0, metaState: JavaKeyEvent.metaCapsLockOn | JavaKeyEvent.metaShiftOn,
                          repeatCount: 0, unicodeChar: 0, eventTime: 0, downTime: 0).getModifiers() == JavaKeyEvent.metaShiftOn)
 }
+
+@Test func aCapturedPointerSendsMovement() {
+    JavaFramework.register()
+    let recorder = InputRecorder()
+    recorder.input.pointerCaptured = true
+    recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 500; $0.motion.y = 500; $0.motion.xrel = 3; $0.motion.yrel = -2 }
+    #expect(recorder.motions.first?.source == JavaMotionEvent.sourceMouseRelative)
+    #expect(recorder.motions.first?.action == JavaMotionEvent.actionHoverMove)
+    #expect(recorder.motions.first?.getRawX(0) == 3 && recorder.motions.first?.getRawY(0) == -2)
+    recorder.input.pointerCaptured = false
+    recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 500; $0.motion.y = 400; $0.motion.xrel = 0; $0.motion.yrel = -100 }
+    #expect(recorder.motions.last?.source == JavaMotionEvent.sourceMouse && recorder.motions.last?.getRawY(0) == 400)
+}
+
+@Test func theGameLocksAndUnlocksTheCursor() {
+    JavaFramework.register()
+    let activity = JavaMinecraftActivity()
+    activity.lockCursor()
+    #expect(JavaMinecraftActivity.cursorLocked)
+    activity.unlockCursor()
+    #expect(!JavaMinecraftActivity.cursorLocked)
+}
