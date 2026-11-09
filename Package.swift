@@ -12,6 +12,9 @@ let package = Package(
         // Stands in for libandroid.so and libart.so: one library, as there
         // is to be one JVM however many things need it.
         .library(name: "MeadAndroid", type: .dynamic, targets: ["MeadAndroid"]),
+        // Stand in for libEGL.so and the GLES libraries, and libvulkan.so.
+        .library(name: "MeadEGL", type: .dynamic, targets: ["MeadEGL"]),
+        .library(name: "MeadVulkan", type: .dynamic, targets: ["MeadVulkan"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
@@ -67,7 +70,10 @@ let package = Package(
             dependencies: ["MeadJNI", "MeadInterface"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
-        .target(name: "CMeadAndroid", dependencies: ["CMeadJNI"]),
+        // The host's graphics libraries, through what little needs changing.
+        .target(name: "MeadEGL", dependencies: ["MeadInterface"]),
+        .target(name: "MeadVulkan", dependencies: ["MeadInterface"]),
+        .target(name: "CMeadAndroid", dependencies: ["CMeadJNI", "MeadInterface"]),
         .target(
             name: "MeadAndroid",
             dependencies: ["CMeadAndroid", "MeadJNI", "MeadJava", "MeadWindow", "MeadInterface"],
