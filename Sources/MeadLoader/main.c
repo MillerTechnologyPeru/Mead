@@ -3,6 +3,7 @@
 // Linux providers that stand in for bionic, the NDK and the JVM.
 
 #define _GNU_SOURCE
+#include "mead_interface.h"
 #include "mead_loader.h"
 #include "mead_log.h"
 
@@ -21,6 +22,9 @@ static void usage(FILE *out) {
           "  --strict    fail when a non-weak import cannot be resolved\n"
           "  --selftest  load the library, run its mead_selftest and exit\n"
           "              with what it returns\n"
+          "  --graphics-api auto|gles|vulkan\n"
+          "              the graphics API the app gets; the same as\n"
+          "              MEAD_GRAPHICS_API\n"
           "  -h, --help  show this help\n"
           "\n"
           "environment:\n"
@@ -28,6 +32,8 @@ static void usage(FILE *out) {
           "  MEAD_STRICT         1: abort on an unresolved import when called\n"
           "  MEAD_UNIMPLEMENTED  continue: an unresolved function reports itself\n"
           "                      once and returns 0 instead of aborting\n"
+          "  MEAD_GRAPHICS_API   auto (the default) offers both; gles or vulkan\n"
+          "                      hides the other from the game\n"
           "  MEAD_DATA_DIR       where the game's files are, when the argument\n"
           "                      is a library rather than a directory\n"
           "\n"
@@ -75,7 +81,13 @@ int main(int argc, char **argv) {
             report = true;
         else if (strcmp(argv[first], "--selftest") == 0)
             selftest = true;
-        else if (strcmp(argv[first], "--strict") == 0)
+        else if (strcmp(argv[first], "--graphics-api") == 0) {
+            if (first + 1 >= argc) {
+                usage(stderr);
+                return 1;
+            }
+            setenv("MEAD_GRAPHICS_API", argv[++first], 1);
+        } else if (strcmp(argv[first], "--strict") == 0)
             setenv("MEAD_STRICT", "1", 0);
         else if (strcmp(argv[first], "-h") == 0 || strcmp(argv[first], "--help") == 0) {
             usage(stdout);
@@ -85,6 +97,11 @@ int main(int argc, char **argv) {
     }
     if (first >= argc) {
         usage(stderr);
+        return 1;
+    }
+    if (mead_graphics_api() == MEAD_GRAPHICS_INVALID) {
+        fprintf(stderr, "mead: MEAD_GRAPHICS_API is \"%s\"; it can be auto, gles or vulkan\n",
+                getenv("MEAD_GRAPHICS_API"));
         return 1;
     }
 
