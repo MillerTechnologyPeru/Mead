@@ -45,6 +45,8 @@ static void load(void) {
     BIND(clear, "SDL_ClearAudioStream")
     BIND(set_gain, "SDL_SetAudioStreamGain")
     BIND(error, "SDL_GetError")
+    BIND(stream_device, "SDL_GetAudioStreamDevice")
+    BIND(device_format, "SDL_GetAudioDeviceFormat")
     if (!init || !init(MEAD_SDL_INIT_AUDIO)) {
         fprintf(stderr, "mead: SDL audio: %s\n", api.error());
         return;
@@ -56,4 +58,16 @@ const audio_api *audio_backend(void) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, load);
     return api_ready ? &api : NULL;
+}
+
+int audio_device_frames(void *stream, int rate) {
+    if (!api_ready || !stream)
+        return 0;
+    mead_sdl_audio_spec spec;
+    int frames = 0;
+    uint32_t device = api.stream_device(stream);
+    if (!device || !api.device_format(device, &spec, &frames) || frames <= 0 || spec.freq <= 0)
+        return 0;
+    // The device's frames are at its own rate; the stream converts.
+    return (int)((int64_t)frames * rate / spec.freq);
 }
