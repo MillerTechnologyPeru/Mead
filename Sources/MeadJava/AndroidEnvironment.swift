@@ -64,7 +64,8 @@ public enum AndroidEnvironment {
     }
 }
 
-/// Brings the framework classes into being. Safe to call again.
+/// Brings the framework classes into being: Android's and Java's own, with
+/// no game's. Safe to call again.
 public enum JavaFramework {
     public static func register() {
         let runtime = JavaRuntime.shared
@@ -85,7 +86,6 @@ public enum JavaFramework {
             ("remove", "(Ljava/lang/Object;)Ljava/lang/Object;"), ("containsKey", "(Ljava/lang/Object;)Z"),
         ])
 
-        runtime.defineInterface("com/mojang/minecraftpe/store/StoreListener")
         runtime.defineInterface("java/security/Key")
         runtime.defineInterface("java/security/PublicKey", extending: ["java/security/Key"])
         runtime.defineInterface("java/security/spec/KeySpec")
@@ -96,10 +96,8 @@ public enum JavaFramework {
             JavaFile.self, JavaAssetManager.self, JavaContext.self, JavaContextWrapper.self, JavaActivity.self,
             JavaNativeActivity.self, JavaBuild.self, JavaBuildVersion.self, JavaSurface.self, JavaFMOD.self, JavaPairipVMRunner.self,
             JavaClassLoader.self, JavaConfiguration.self, JavaInsets.self, JavaDisplay.self, JavaWindowManager.self,
-            JavaGameActivity.self, JavaMinecraftActivity.self, JavaCrashManager.self, JavaAppExitInfoHelper.self,
-            JavaHardwareInformation.self, JavaBatteryMonitor.self, JavaThermalMonitor.self, JavaDateTimeHelper.self,
-            JavaTextInputConnection.self, JavaTextInputState.self, JavaNetworkMonitor.self, JavaBase64.self, JavaArrays.self,
-            JavaX509EncodedKeySpec.self, JavaRSAPublicKey.self, JavaKeyFactory.self, JavaSignature.self, JavaNativeStoreListener.self, JavaExtraLicenseResponseData.self, JavaStore.self, JavaStoreFactory.self,
+            JavaGameActivity.self, JavaTextInputConnection.self, JavaTextInputState.self, JavaBase64.self, JavaArrays.self,
+            JavaX509EncodedKeySpec.self, JavaRSAPublicKey.self, JavaKeyFactory.self, JavaSignature.self,
             JavaHttpClientRequest.self, JavaMotionEvent.self, JavaKeyEvent.self,
         ]
         for type in classes {
