@@ -229,6 +229,8 @@ static VkResult shim_vkCreateInstance(const VkInstanceCreateInfo *info, const vo
     return result;
 }
 
+static void remember_surface(VkSurfaceKHR surface, void *window);
+
 static VkResult shim_vkCreateAndroidSurfaceKHR(VkInstance instance, const VkAndroidSurfaceCreateInfoKHR *info,
                                                const void *allocator, VkSurfaceKHR *surface) {
     if (mead_graphics_api() == MEAD_GRAPHICS_VULKAN) {
@@ -237,6 +239,7 @@ static VkResult shim_vkCreateAndroidSurfaceKHR(VkInstance instance, const VkAndr
         void *window = handle ? handle(info->window) : NULL;
         if (!window || !ensure_sdl() || !sdl_create_surface(window, instance, allocator, surface))
             return VK_ERROR_INITIALIZATION_FAILED;
+        remember_surface(*surface, info->window);
         return VK_SUCCESS;
     }
     mead_native_window native;
@@ -252,7 +255,10 @@ static VkResult shim_vkCreateAndroidSurfaceKHR(VkInstance instance, const VkAndr
             .display = native.display,
             .window = (unsigned long)native.window,
         };
-        return create(instance, &created, allocator, surface);
+        VkResult result = create(instance, &created, allocator, surface);
+        if (result == VK_SUCCESS)
+            remember_surface(*surface, info->window);
+        return result;
     }
     typedef VkResult (*Create)(VkInstance, const VkWaylandSurfaceCreateInfoKHR *, const void *, VkSurfaceKHR *);
     Create create = (Create)host_get_instance_proc_addr(instance, "vkCreateWaylandSurfaceKHR");
@@ -263,7 +269,80 @@ static VkResult shim_vkCreateAndroidSurfaceKHR(VkInstance instance, const VkAndr
         .display = native.display,
         .surface = (void *)native.window,
     };
-    return create(instance, &created, allocator, surface);
+    VkResult result = create(instance, &created, allocator, surface);
+    if (result == VK_SUCCESS)
+        remember_surface(*surface, info->window);
+    return result;
+}
+
+// Android's surfaces always know their size. Wayland's leave it to the
+// swapchain, saying so with an extent of all ones, which an Android game
+// would take for a very large window. So each surface remembers its window.
+typedef struct VkExtent2D {
+    uint32_t width, height;
+} VkExtent2D;
+
+typedef struct VkSurfaceCapabilitiesKHR {
+    uint32_t minImageCount, maxImageCount;
+    VkExtent2D currentExtent, minImageExtent, maxImageExtent;
+    // the rest is left as the host says
+    uint32_t rest[6];
+} VkSurfaceCapabilitiesKHR;
+
+enum { MAX_SURFACES = 16 };
+static struct {
+    VkSurfaceKHR surface;
+    void *window;
+} surfaces[MAX_SURFACES];
+static pthread_mutex_t surfaces_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void remember_surface(VkSurfaceKHR surface, void *window) {
+    pthread_mutex_lock(&surfaces_lock);
+    for (int index = 0; index < MAX_SURFACES; index++)
+        if (surfaces[index].surface == 0 || surfaces[index].window == window) {
+            surfaces[index].surface = surface;
+            surfaces[index].window = window;
+            break;
+        }
+    pthread_mutex_unlock(&surfaces_lock);
+}
+
+static void *window_of(VkSurfaceKHR surface) {
+    void *window = NULL;
+    pthread_mutex_lock(&surfaces_lock);
+    for (int index = 0; index < MAX_SURFACES && !window; index++)
+        if (surfaces[index].surface == surface)
+            window = surfaces[index].window;
+    pthread_mutex_unlock(&surfaces_lock);
+    return window;
+}
+
+static uint32_t clamp(uint32_t value, uint32_t low, uint32_t high) {
+    return value < low ? low : value > high ? high : value;
+}
+
+static void fill_in_extent(VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *capabilities) {
+    if (capabilities->currentExtent.width != UINT32_MAX || !loader)
+        return;
+    void *window = window_of(surface);
+    typedef int32_t (*Measure)(void *);
+    Measure width = (Measure)loader->lookup_symbol(NULL, "ANativeWindow_getWidth");
+    Measure height = (Measure)loader->lookup_symbol(NULL, "ANativeWindow_getHeight");
+    if (!window || !width || !height)
+        return;
+    capabilities->currentExtent.width = clamp((uint32_t)width(window), capabilities->minImageExtent.width, capabilities->maxImageExtent.width);
+    capabilities->currentExtent.height = clamp((uint32_t)height(window), capabilities->minImageExtent.height, capabilities->maxImageExtent.height);
+}
+
+static VkResult shim_vkGetPhysicalDeviceSurfaceCapabilitiesKHR(void *device, VkSurfaceKHR surface, VkSurfaceCapabilitiesKHR *capabilities) {
+    typedef VkResult (*Get)(void *, VkSurfaceKHR, VkSurfaceCapabilitiesKHR *);
+    static Get host;
+    if (!host)
+        host = (Get)dlsym(vulkan_library, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    VkResult result = host(device, surface, capabilities);
+    if (result == VK_SUCCESS)
+        fill_in_extent(surface, capabilities);
+    return result;
 }
 
 static PFN_vkVoidFunction shim_vkGetInstanceProcAddr(VkInstance instance, const char *name);
@@ -277,6 +356,8 @@ static PFN_vkVoidFunction shim_for(const char *name) {
         return (PFN_vkVoidFunction)shim_vkEnumerateInstanceExtensionProperties;
     if (strcmp(name, "vkCreateAndroidSurfaceKHR") == 0)
         return (PFN_vkVoidFunction)shim_vkCreateAndroidSurfaceKHR;
+    if (strcmp(name, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0)
+        return (PFN_vkVoidFunction)shim_vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
     return NULL;
 }
 
