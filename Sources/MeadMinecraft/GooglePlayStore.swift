@@ -1,6 +1,7 @@
 import Foundation
 import MeadGooglePlay
 import MeadJNI
+import MeadJava
 
 // The game's store, on the fake JVM. Selling things isn't supported, so the
 // store says it has started with nothing available. Whether the account has
