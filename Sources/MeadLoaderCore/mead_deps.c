@@ -52,6 +52,7 @@ static bool provider_tried[PROVIDER_COUNT];    // whether that dlopen has been t
 static char provider_dir[4096];   // where the providers are
 static char *game_dir;            // the first game library's directory
 static mead_image *adding_root;   // the library the current load began with
+static void (*provider_opened)(void *handle); // once the providers have started
 
 void mead_deps_lock(void) {
     pthread_mutex_lock(&lock);
@@ -93,8 +94,17 @@ static void *open_provider(size_t index) {
         char path[4096];
         snprintf(path, sizeof(path), "%s/%s", provider_dir, providers[index].file);
         provider_handles[index] = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        if (!provider_handles[index])
+        if (!provider_handles[index]) {
             mead_trace("load", "no provider for %s: %s", providers[index].soname, dlerror());
+        } else if (provider_opened) {
+            // Opened after the rest have started, as by a game's dlopen of
+            // libvulkan.so: it still gets its startup, once.
+            bool seen = false;
+            for (size_t other = 0; other < PROVIDER_COUNT; other++)
+                seen = seen || (other != index && provider_handles[other] == provider_handles[index]);
+            if (!seen)
+                provider_opened(provider_handles[index]);
+        }
     }
     return provider_handles[index];
 }
@@ -151,6 +161,12 @@ void *mead_deps_provider_symbol(const char *name) {
     }
     pthread_mutex_unlock(&lock);
     return symbol;
+}
+
+void mead_deps_set_provider_opened(void (*callback)(void *handle)) {
+    pthread_mutex_lock(&lock);
+    provider_opened = callback;
+    pthread_mutex_unlock(&lock);
 }
 
 void mead_deps_providers(void ***handles, const char ***files, size_t *count) {
