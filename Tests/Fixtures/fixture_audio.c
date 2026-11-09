@@ -86,6 +86,8 @@ static int check_output(int want_frames) {
     int matched = 0;
     for (size_t at = start; at < frames && matched < want_frames; at++, matched++)
         CHECK(data[at * 2] == (int16_t)(1 + matched) && data[at * 2 + 1] == (int16_t)-(1 + matched));
+    if (matched < want_frames)
+        fprintf(stderr, "fixture_audio: the file holds %d frames of the ramp, of %d wanted\n", matched, want_frames);
     CHECK(matched >= want_frames);
     return 0;
 }
@@ -292,7 +294,12 @@ static int test_aaudio_blocking(void) {
     fill_ramp(samples, FRAMES * 2, 1);
     CHECK(AAudioStream_write(stream, samples, FRAMES * 2, 5000000000) == FRAMES * 2);
     CHECK(AAudioStream_getFramesWritten(stream) == FRAMES * 2);
-    usleep(400000);
+    // Written is not yet played: wait for the device to have taken it all,
+    // however long a busy machine makes that, then for it to reach the file.
+    for (int waited = 0; AAudioStream_getFramesRead(stream) < FRAMES * 2 && waited < 5000; waited += 5)
+        usleep(5000);
+    CHECK(AAudioStream_getFramesRead(stream) == FRAMES * 2);
+    usleep(100000);
     CHECK(AAudioStream_requestStop(stream) == AAUDIO_OK);
     CHECK(AAudioStream_getState(stream) == AAUDIO_STREAM_STATE_STOPPED);
     CHECK(AAudioStream_close(stream) == AAUDIO_OK);
@@ -317,13 +324,20 @@ static int test_aaudio_recording(void) {
 }
 
 int mead_selftest(void) {
-    int (*const tests[])(void) = {
-        test_opensles_playback, test_opensles_recording, test_aaudio_callback, test_aaudio_blocking, test_aaudio_recording,
+    static const struct {
+        const char *name;
+        int (*run)(void);
+    } tests[] = {
+        { "OpenSL ES playback", test_opensles_playback }, { "OpenSL ES recording", test_opensles_recording },
+        { "AAudio callback", test_aaudio_callback }, { "AAudio blocking writes", test_aaudio_blocking },
+        { "AAudio recording", test_aaudio_recording },
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
-        int failed = tests[index]();
-        if (failed)
+        int failed = tests[index].run();
+        if (failed) {
+            fprintf(stderr, "fixture_audio: %s failed\n", tests[index].name);
             return failed;
+        }
     }
     return 0;
 }
