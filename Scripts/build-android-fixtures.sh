@@ -62,6 +62,16 @@ $common -O2 -D_FORTIFY_SOURCE=2 -shared -Wl,-soname,libfixture_bionic.so \
 $common -O1 -shared -Wl,-soname,libfixture_jni.so -o $out/libfixture_jni.so \
     Tests/Fixtures/fixture_jni.c
 
+# A real native_app_glue app, its assets, and the library it loads by name.
+mkdir -p $out/app/assets/sub
+printf 'hello from assets' > $out/app/assets/hello.txt
+printf 'nested' > $out/app/assets/sub/nested.txt
+glue=$ndk/sources/android/native_app_glue
+$common -shared -Wl,-soname,libfixture_android_lib.so -o $out/libfixture_android_lib.so \
+    Tests/Fixtures/fixture_android_lib.c
+$common -shared -Wl,-soname,libfixture_glue.so -I$glue -o $out/libfixture_glue.so \
+    Tests/Fixtures/fixture_glue.c $glue/android_native_app_glue.c -landroid -llog -ldl
+
 # As NDK builds do: libunwind goes into each library, statically.
 cxx="$(echo "$common" | sed 's/^clang-19/clang++-19/') --unwindlib=libunwind"
 $cxx -nostdlib++ -shared -Wl,-soname,libfixture_cxx_thrower.so \
