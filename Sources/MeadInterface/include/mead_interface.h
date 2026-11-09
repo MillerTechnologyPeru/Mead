@@ -11,6 +11,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 // Swift reads this; #define would not cross into it.
 enum { MEAD_STARTUP_INFO_VERSION = 2 };
@@ -100,6 +102,31 @@ typedef struct mead_image_info {
 // its JavaVM, and where its registered natives are kept with it.
 typedef void (*mead_provider_image_fn)(const mead_image_info *image);
 #define MEAD_PROVIDER_IMAGE_INIT_SYMBOL "mead_provider_image_init"
+
+// Which graphics API the app is to use, from MEAD_GRAPHICS_API. Auto leaves
+// both on offer. Choosing one has the other look absent, as on a device
+// without it, and Vulkan's window is then made for Vulkan and goes through
+// SDL's surface creation.
+enum {
+    MEAD_GRAPHICS_AUTO = 0,
+    MEAD_GRAPHICS_GLES = 1,
+    MEAD_GRAPHICS_VULKAN = 2,
+    MEAD_GRAPHICS_INVALID = -1,
+};
+
+static inline int mead_graphics_api_named(const char *value) {
+    if (!value || !*value || strcmp(value, "auto") == 0)
+        return MEAD_GRAPHICS_AUTO;
+    if (strcmp(value, "gles") == 0)
+        return MEAD_GRAPHICS_GLES;
+    if (strcmp(value, "vulkan") == 0)
+        return MEAD_GRAPHICS_VULKAN;
+    return MEAD_GRAPHICS_INVALID;
+}
+
+static inline int mead_graphics_api(void) {
+    return mead_graphics_api_named(getenv("MEAD_GRAPHICS_API"));
+}
 
 // What the host's windowing system calls an ANativeWindow, so that the EGL
 // and Vulkan providers can reach it. libMeadAndroid.so exports
