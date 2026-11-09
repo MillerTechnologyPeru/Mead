@@ -66,6 +66,19 @@ public final class JavaFMOD: JavaObject {
     @JavaMethod("getAssetManager") public static func getAssetManager() -> JavaAssetManager? { JavaAssetManager() }
 }
 
+/// The Java half of Google Play's pairip, whose native half is the game's own
+/// libpairipcore.so. The bytecode invoke would run is in the APK's DEX, which
+/// Mead cannot run, so it does nothing and returns null, as mcpelauncher's
+/// does. It claims no license or integrity result.
+@JavaClass("com/pairip/VMRunner")
+public final class JavaPairipVMRunner: JavaObject {
+    @JavaMethod("invoke", signature: "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;")
+    public static func invoke(_ name: String?, _ arguments: JavaObject?) -> JavaObject? {
+        JavaRuntime.shared.trace("com/pairip/VMRunner.invoke(\(name ?? "null")) is a no-op")
+        return nil
+    }
+}
+
 @JavaClass("android/os/Build")
 public final class JavaBuild: JavaObject {
     @JavaField("BOARD") public static var board: String? = "mead"
