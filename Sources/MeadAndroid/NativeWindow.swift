@@ -28,6 +28,17 @@ public final class NativeWindow {
         return (width, height)
     }
 
+    /// The window's own size in pixels, whatever buffer size the game asked for.
+    var pixelWidth: Int32 { windowSize.width }
+    var pixelHeight: Int32 { windowSize.height }
+
+    /// Pixels per SDL point, which is what SDL's mouse positions are in.
+    var pixelsPerPoint: Float {
+        var points = (width: Int32(0), height: Int32(0))
+        guard let handle, SDL.getWindowSize(handle, &points.width, &points.height), points.width > 0 else { return 1 }
+        return Float(windowSize.width) / Float(points.width)
+    }
+
     var width: Int32 { bufferWidth > 0 ? bufferWidth : windowSize.width }
     var height: Int32 { bufferHeight > 0 ? bufferHeight : windowSize.height }
 
@@ -150,3 +161,5 @@ public func ANativeWindow_toSurface(_ env: UnsafeMutableRawPointer, _ pointer: U
 public func meadAndroidWindowHandle(_ pointer: UnsafeMutableRawPointer) -> UnsafeMutableRawPointer? {
     window(pointer).handle
 }
+
+
