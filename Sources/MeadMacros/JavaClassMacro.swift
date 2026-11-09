@@ -115,11 +115,16 @@ public struct JavaClassMacro: MemberMacro {
         }
 
         let list = members.isEmpty ? "[]" : "[\n\(members.joined(separator: ",\n"))\n]"
-        return [
+        var declarations: [DeclSyntax] = [
             "public override class var javaClassName: String { \(raw: javaName) }",
             "public override class var javaSuperclassType: JavaObject.Type? { \(raw: parent).self }",
             "public override class func javaMembers() -> [JavaMember] { \(raw: list) }",
         ]
+        if let interfaces = node.arguments?.as(LabeledExprListSyntax.self)?
+            .first(where: { $0.label?.text == "implements" })?.expression.trimmedDescription {
+            declarations.append("public override class var javaInterfaceNames: [String] { \(raw: interfaces) }")
+        }
+        return declarations
     }
 
     private static func method(_ function: FunctionDeclSyntax, attribute: AttributeSyntax, type: String) -> String {
