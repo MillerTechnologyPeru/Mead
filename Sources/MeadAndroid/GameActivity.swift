@@ -68,8 +68,8 @@ final class GameActivityRunner {
 
         let activity = JavaMinecraftActivity()
         let assets = activity.getAssets()
-        JavaMinecraftActivity.screenWidth = window.width
-        JavaMinecraftActivity.screenHeight = window.height
+        JavaMinecraftActivity.screenWidth = window.pixelWidth
+        JavaMinecraftActivity.screenHeight = window.pixelHeight
         let configuration = thread.newLocal(JavaConfiguration())
 
         let dataPath = AndroidEnvironment.filesDirectory
@@ -89,6 +89,11 @@ final class GameActivityRunner {
             thread.call(Self.gameActivity, name, signature, on: activity, [pointer] + more)
         }
 
+        // Its text input goes through an object GameActivity keeps.
+        var connection = jvalue()
+        connection.l = thread.newLocal(JavaTextInputConnection())
+        lifecycle("setInputConnectionNative", "(JLcom/google/androidgamesdk/gametextinput/InputConnection;)V", [connection])
+
         lifecycle("onStartNative")
         lifecycle("onResumeNative")
 
@@ -99,36 +104,144 @@ final class GameActivityRunner {
         lifecycle("onSurfaceCreatedNative", "(JLandroid/view/Surface;)V", [surfaceValue])
         var format = jvalue(), widthValue = jvalue(), heightValue = jvalue()
         format.i = 1 // RGBA_8888
-        widthValue.i = window.width
-        heightValue.i = window.height
+        // The window's size, not any buffer size set since: on Android the
+        // compositor scales those buffers to the window, and here the window
+        // is what the game has to fill.
+        widthValue.i = window.pixelWidth
+        heightValue.i = window.pixelHeight
         lifecycle("onSurfaceChangedNative", "(JLandroid/view/Surface;III)V", [surfaceValue, format, widthValue, heightValue])
         var focused = jvalue()
         focused.z = 1
         lifecycle("onWindowFocusChangedNative", "(JZ)V", [focused])
 
+        // The network is up, as far as the game is to know.
+        var up = jvalue()
+        up.z = 1
+        thread.call("com/mojang/minecraftpe/NetworkMonitor", "nativeUpdateNetworkStatus", "(ZZZ)V", on: JavaNetworkMonitor(), [up, up, up])
+
+        // Input, as GameActivity's Java hands it over.
+        // Each event's references are local to a frame of their own, as they
+        // are to a Java call: the main thread's would otherwise only grow.
+        let input = GameActivityInput(sendMotion: { motion in
+            thread.pushFrame()
+            defer { thread.popFrame() }
+            var event = jvalue(), pointerCount = jvalue(), historySize = jvalue(), deviceId = jvalue(), source = jvalue()
+            var action = jvalue(), eventTime = jvalue(), downTime = jvalue(), flags = jvalue(), metaState = jvalue()
+            var actionButton = jvalue(), buttonState = jvalue(), classification = jvalue(), edgeFlags = jvalue()
+            var precisionX = jvalue(), precisionY = jvalue()
+            event.l = thread.newLocal(motion)
+            pointerCount.i = motion.getPointerCount()
+            historySize.i = motion.getHistorySize()
+            deviceId.i = motion.deviceId
+            source.i = motion.source
+            action.i = motion.action
+            eventTime.j = motion.eventTime
+            downTime.j = motion.downTime
+            metaState.i = motion.metaState
+            buttonState.i = motion.buttonState
+            actionButton.i = motion.actionButton
+            precisionX.f = 1
+            precisionY.f = 1
+            let handled = thread.call(Self.gameActivity, "onTouchEventNative", "(JLandroid/view/MotionEvent;IIIIIJJIIIIIIFF)Z", on: activity,
+                                      [pointer, event, pointerCount, historySize, deviceId, source, action, eventTime, downTime, flags,
+                                       metaState, actionButton, buttonState, classification, edgeFlags, precisionX, precisionY])
+            JavaRuntime.shared.trace("onTouchEventNative action \(motion.action) source \(motion.source) -> \(handled.z != 0)")
+        }, sendKey: { key in
+            thread.pushFrame()
+            defer { thread.popFrame() }
+            var event = jvalue()
+            event.l = thread.newLocal(key)
+            let name = key.action == JavaKeyEvent.actionDown ? "onKeyDownNative" : "onKeyUpNative"
+            _ = thread.call(Self.gameActivity, name, "(JLandroid/view/KeyEvent;)Z", on: activity, [pointer, event])
+        })
+
+        // MEAD_DEBUG_TAPS="seconds:x,y;...": clicks at those times after the main
+        // loop starts, for trying a game's screens on a machine nobody is at.
+        // Each tap moves the pointer there first and is held down for 150 ms,
+        // as a click is: a UI takes the press on what the pointer is over.
+        // "seconds:key=scancode" presses a key for 150 ms instead, and
+        // "seconds:wheel=notches" turns the mouse wheel.
+        var taps: [(at: Double, x: Float, y: Float, kind: Int)] = (getenv("MEAD_DEBUG_TAPS").map { String(cString: $0) } ?? "")
+            .split(separator: ";").flatMap { item -> [(at: Double, x: Float, y: Float, kind: Int)] in
+                let halves = item.split(separator: ":", maxSplits: 1)
+                guard halves.count == 2, let at = Double(halves[0]) else { return [] }
+                if halves[1].hasPrefix("key="), let code = Float(halves[1].dropFirst(4)) {
+                    return [(at, code, 0, 3), (at + 0.15, code, 0, 4)]
+                }
+                if halves[1].hasPrefix("wheel="), let notches = Float(halves[1].dropFirst(6)) {
+                    return [(at, notches, 0, 5)]
+                }
+                let parts = halves[1].split(separator: ",").compactMap { Float($0) }
+                guard parts.count == 2 else { return [] }
+                return [(at, parts[0], parts[1], 0), (at + 0.2, parts[0], parts[1], 1), (at + 0.35, parts[0], parts[1], 2)]
+            }
+        var started = timespec()
+        clock_gettime(CLOCK_MONOTONIC, &started)
+
         var event = mead_sdl_event()
         var running = true
+        activity.beginUiCallbacks()
         while running {
             while looper.pollOnce(timeout: 0, outFd: nil, outEvents: nil, outData: nil) == ALOOPER_POLL_CALLBACK {}
-            for callback in activity.takeUiCallbacks() {
-                var value = jvalue()
-                value.j = callback
-                thread.call("com/mojang/minecraftpe/MainActivity", "nativeRunNativeCallbackOnUiThread", "(J)V", on: activity, [value])
+            activity.runUiCallbacks()
+            if let tap = taps.first {
+                var now = timespec()
+                clock_gettime(CLOCK_MONOTONIC, &now)
+                if Double(now.tv_sec - started.tv_sec) + Double(now.tv_nsec - started.tv_nsec) / 1e9 >= tap.at {
+                    taps.removeFirst()
+                    writeError("debug \(["move", "down", "up", "key down", "key up", "wheel"][tap.kind]) at \(tap.x),\(tap.y)")
+                    do {
+                        var click = mead_sdl_event()
+                        switch tap.kind {
+                        case 0:
+                            click.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION)
+                            click.motion.x = tap.x
+                            click.motion.y = tap.y
+                        case 1, 2:
+                            let down = tap.kind == 1
+                            click.button.type = UInt32(down ? MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN : MEAD_SDL_EVENT_MOUSE_BUTTON_UP)
+                            click.button.button = UInt8(MEAD_SDL_BUTTON_LEFT)
+                            click.button.down = down
+                            click.button.x = tap.x
+                            click.button.y = tap.y
+                        case 3, 4:
+                            click.key.type = UInt32(tap.kind == 3 ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
+                            click.key.scancode = UInt32(tap.x)
+                            click.key.down = tap.kind == 3
+                        default:
+                            click.wheel.type = UInt32(MEAD_SDL_EVENT_MOUSE_WHEEL)
+                            click.wheel.y = tap.x
+                            click.wheel.mouse_x = Float(window.pixelWidth) / 2
+                            click.wheel.mouse_y = Float(window.pixelHeight) / 2
+                        }
+                        input.handle(click, windowWidth: Float(window.pixelWidth), windowHeight: Float(window.pixelHeight))
+                    }
+                }
             }
             guard SDL.waitEventTimeout(&event, 10) else { continue }
             switch Int(event.type) {
             case MEAD_SDL_EVENT_QUIT, MEAD_SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 running = false
-            case MEAD_SDL_EVENT_WINDOW_RESIZED:
+            case MEAD_SDL_EVENT_WINDOW_RESIZED, MEAD_SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 window.windowWasResized()
-                widthValue.i = window.width
-                heightValue.i = window.height
+                // A buffer size the game set was for the old window.
+                window.bufferWidth = 0
+                window.bufferHeight = 0
+                JavaMinecraftActivity.screenWidth = window.pixelWidth
+                JavaMinecraftActivity.screenHeight = window.pixelHeight
+                widthValue.i = window.pixelWidth
+                heightValue.i = window.pixelHeight
                 lifecycle("onSurfaceChangedNative", "(JLandroid/view/Surface;III)V", [surfaceValue, format, widthValue, heightValue])
+                // Minecraft's own Java tells it as well, and that is what it
+                // lays its screens out by.
+                _ = thread.call("com/mojang/minecraftpe/MainActivity", "nativeResize", "(II)V", on: activity, [widthValue, heightValue])
             default:
-                break
+                input.handle(event, windowWidth: Float(window.pixelWidth), windowHeight: Float(window.pixelHeight),
+                             pixelsPerPoint: window.pixelsPerPoint)
             }
         }
 
+        activity.endUiCallbacks()
         lifecycle("onPauseNative")
         lifecycle("onStopNative")
         lifecycle("onSurfaceDestroyedNative")
