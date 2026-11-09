@@ -7,6 +7,10 @@ let package = Package(
     products: [
         // Loader: runs arm64 Android ELF libraries on arm64 Linux.
         .executable(name: "mead", targets: ["MeadLoader"]),
+        // Signs in to Google, for the license check below.
+        .executable(name: "mead-google-login", targets: ["MeadGoogleLogin"]),
+        // Google Play: sign-in and a real license check, with no JNI in it.
+        .library(name: "MeadGooglePlay", targets: ["MeadGooglePlay"]),
         // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
         .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
         // Stands in for libandroid.so and libart.so: one library, as there
@@ -66,10 +70,23 @@ let package = Package(
         // SDL3, found at run time.
         .target(name: "CMeadWindow"),
         .target(name: "MeadWindow", dependencies: ["CMeadWindow"]),
+        // Checking signatures: RSA, SHA-1, SHA-256.
+        .target(name: "MeadCrypto"),
+        // Google Play's sign-in and license servers, over FoundationNetworking.
+        .target(
+            name: "MeadGooglePlay",
+            dependencies: ["MeadCrypto"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .executableTarget(
+            name: "MeadGoogleLogin",
+            dependencies: ["MeadGooglePlay"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
         // The Android framework's classes, on the fake JVM.
         .target(
             name: "MeadJava",
-            dependencies: ["MeadJNI", "MeadInterface"],
+            dependencies: ["MeadCrypto", "MeadGooglePlay", "MeadJNI", "MeadInterface"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // The host's graphics libraries, through what little needs changing.
@@ -88,8 +105,13 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
+            name: "MeadGooglePlayTests",
+            dependencies: ["MeadGooglePlay"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
             name: "MeadAndroidTests",
-            dependencies: ["MeadAndroid"],
+            dependencies: ["MeadAndroid", "MeadCrypto", "CMeadWindow"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
