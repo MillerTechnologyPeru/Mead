@@ -12,6 +12,7 @@ public enum SDL {
     public nonisolated(unsafe) static var getError: (@convention(c) () -> UnsafePointer<CChar>?)!
     public nonisolated(unsafe) static var createWindow: (@convention(c) (UnsafePointer<CChar>, Int32, Int32, UInt64) -> Pointer?)!
     public nonisolated(unsafe) static var destroyWindow: (@convention(c) (Pointer?) -> Void)!
+    public nonisolated(unsafe) static var setWindowRelativeMouseMode: (@convention(c) (Pointer?, Bool) -> Bool)!
     public nonisolated(unsafe) static var getWindowSize: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> Bool)!
     public nonisolated(unsafe) static var getWindowSizeInPixels: (@convention(c) (Pointer?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?) -> Bool)!
     public nonisolated(unsafe) static var getWindowProperties: (@convention(c) (Pointer?) -> UInt32)!
@@ -51,6 +52,7 @@ public enum SDL {
         createWindow = bind("SDL_CreateWindow")
         destroyWindow = bind("SDL_DestroyWindow")
         getWindowSize = bind("SDL_GetWindowSize")
+        setWindowRelativeMouseMode = bind("SDL_SetWindowRelativeMouseMode")
         getWindowSizeInPixels = bind("SDL_GetWindowSizeInPixels")
         getWindowProperties = bind("SDL_GetWindowProperties")
         getPointerProperty = bind("SDL_GetPointerProperty")
