@@ -86,7 +86,13 @@ let package = Package(
         // The Android framework's classes, on the fake JVM.
         .target(
             name: "MeadJava",
-            dependencies: ["MeadCrypto", "MeadGooglePlay", "MeadJNI", "MeadInterface"],
+            dependencies: ["MeadCrypto", "MeadJNI", "MeadInterface"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Minecraft's own Java classes: its activity, and its store's license check.
+        .target(
+            name: "MeadMinecraft",
+            dependencies: ["MeadGooglePlay", "MeadJNI", "MeadJava"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         // The host's graphics libraries, through what little needs changing.
@@ -101,7 +107,7 @@ let package = Package(
         .target(name: "CMeadAndroid", dependencies: ["CMeadJNI", "MeadInterface"]),
         .target(
             name: "MeadAndroid",
-            dependencies: ["CMeadAndroid", "MeadJNI", "MeadJava", "MeadWindow", "MeadInterface"],
+            dependencies: ["CMeadAndroid", "MeadJNI", "MeadJava", "MeadMinecraft", "MeadWindow", "MeadInterface"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
@@ -111,7 +117,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MeadAndroidTests",
-            dependencies: ["MeadAndroid", "MeadCrypto", "CMeadWindow"],
+            dependencies: ["MeadAndroid", "MeadCrypto", "MeadMinecraft", "CMeadWindow"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
