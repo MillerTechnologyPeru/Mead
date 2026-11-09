@@ -161,6 +161,16 @@ private nonisolated(unsafe) var tlsBump: (@convention(c) () -> Int32)?
     #expect(mead_deps_provider_symbol("__libc_start_main") == nil)
 }
 
+@Test func theGraphicsProvidersAnswerOnlyGraphicsNames() {
+    guard fixture("libfixture_basic.so") != nil else { return }
+    #expect(mead_deps_provider_symbol("glClear") != nil)
+    #expect(mead_deps_provider_symbol("eglSwapBuffers") != nil)
+    #expect(mead_deps_provider_symbol("vkCreateDevice") != nil)
+    // Spelled like GL and Vulkan, and only reachable as glibc's.
+    #expect(mead_deps_provider_symbol("glob") == nil)
+    #expect(mead_deps_provider_symbol("vkprintf") == nil)
+}
+
 @Test func sixteenKilobyteLibrariesStayAligned() {
     guard let handle = fixture("libfixture_16k.so") else { return }
     let add = mead_find_symbol(handle, "fixture_add")
