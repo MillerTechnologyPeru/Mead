@@ -62,3 +62,22 @@ public func ASensorEventQueue_hasEvents(_ queue: UnsafeMutableRawPointer) -> Int
 
 @_cdecl("ASensorEventQueue_getEvents")
 public func ASensorEventQueue_getEvents(_ queue: UnsafeMutableRawPointer, _ events: UnsafeMutableRawPointer?, _ count: Int) -> Int { 0 }
+
+// A sensor's description. There are never any sensors to describe, so these
+// only answer for a pointer that shouldn't have been given.
+@_cdecl("ASensor_getType")
+public func ASensor_getType(_ sensor: UnsafeRawPointer?) -> Int32 { -1 }
+
+@_cdecl("ASensor_getName")
+public func ASensor_getName(_ sensor: UnsafeRawPointer?) -> UnsafePointer<CChar>? { sensorUnknown }
+
+@_cdecl("ASensor_getVendor")
+public func ASensor_getVendor(_ sensor: UnsafeRawPointer?) -> UnsafePointer<CChar>? { sensorUnknown }
+
+@_cdecl("ASensor_getResolution")
+public func ASensor_getResolution(_ sensor: UnsafeRawPointer?) -> Float { 0 }
+
+@_cdecl("ASensor_getMinDelay")
+public func ASensor_getMinDelay(_ sensor: UnsafeRawPointer?) -> Int32 { 0 }
+
+private let sensorUnknown: UnsafePointer<CChar> = UnsafePointer(strdup("unknown")!)
