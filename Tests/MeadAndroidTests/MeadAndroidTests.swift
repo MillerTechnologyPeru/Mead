@@ -4,6 +4,7 @@ import Glibc
 @testable import MeadAndroid
 import MeadCrypto
 @testable import MeadJava
+@testable import MeadMinecraft
 import MeadJNI
 import Testing
 
@@ -149,7 +150,7 @@ private nonisolated(unsafe) var callbackCalls = 0
 }
 
 @Test func theFrameworkClassesExist() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let runtime = JavaRuntime.shared
     for name in ["android/app/NativeActivity", "android/content/Context", "android/os/Build$VERSION",
                  "java/util/ArrayList", "java/util/HashMap", "java/util/UUID", "java/lang/System", "java/lang/Integer",
@@ -174,7 +175,7 @@ private final class UiCallbackCall {
 }
 
 @Test func aUiCallbackBlocksItsCallerUntilTheMainThreadRunsIt() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let activity = JavaMinecraftActivity()
     activity.beginUiCallbacks()
     let call = UiCallbackCall(activity)
@@ -196,7 +197,7 @@ private final class UiCallbackCall {
 }
 
 @Test func aUiCallbackRunsWhereItIsMadeWithNoMainThreadTurning() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let activity = JavaMinecraftActivity()
     // Nothing is answering: this must return rather than wait.
     activity.runNativeCallbackOnUiThread(1)
@@ -235,7 +236,7 @@ private let rsaMessage = Array("mead signature test".utf8)
 private func base64Bytes(_ text: String) -> [UInt8] { JavaBase64.decode(Array(text.utf8), urlSafe: false)! }
 
 private func verifies(key: [UInt8], message: [UInt8], signature: [UInt8]) throws -> Bool {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let runtime = JavaRuntime.shared
     let specification = JavaX509EncodedKeySpec(encoded: runtime.newByteArray(key))
     let publicKey = try #require(try JavaKeyFactory.getInstance("RSA")?.generatePublic(specification))
@@ -272,7 +273,7 @@ private final class InputRecorder {
 }
 
 @Test func theMouseIsAMouse() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let recorder = InputRecorder()
     recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 5; $0.motion.y = 6 }
     recorder.send { $0.button.type = UInt32(MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN); $0.button.button = 1; $0.button.down = true; $0.button.x = 10; $0.button.y = 20 }
@@ -288,7 +289,7 @@ private final class InputRecorder {
 }
 
 @Test func twoFingersAreTwoPointers() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let recorder = InputRecorder()
     func finger(_ type: Int, _ id: UInt64, _ x: Float) {
         recorder.send { $0.finger.type = UInt32(type); $0.finger.fingerID = id; $0.finger.x = x; $0.finger.y = 0.5 }
@@ -305,7 +306,7 @@ private final class InputRecorder {
 }
 
 @Test func theWheelScrolls() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let recorder = InputRecorder()
     recorder.send { $0.wheel.type = UInt32(MEAD_SDL_EVENT_MOUSE_WHEEL); $0.wheel.y = -1; $0.wheel.mouse_x = 3; $0.wheel.mouse_y = 4 }
     #expect(recorder.motions.first?.action == JavaMotionEvent.actionScroll)
@@ -314,7 +315,7 @@ private final class InputRecorder {
 }
 
 @Test func keysCarryTheirCodeCharacterAndModifiers() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let recorder = InputRecorder()
     // Shift and A, then shift and 1, then Escape.
     recorder.send { $0.key.type = UInt32(MEAD_SDL_EVENT_KEY_DOWN); $0.key.scancode = 4; $0.key.key = 0x61; $0.key.mod = UInt16(MEAD_SDL_KMOD_LSHIFT); $0.key.down = true }
@@ -333,7 +334,7 @@ private final class InputRecorder {
 }
 
 @Test func aCapturedPointerSendsMovement() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let recorder = InputRecorder()
     recorder.input.pointerCaptured = true
     recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 500; $0.motion.y = 500; $0.motion.xrel = 3; $0.motion.yrel = -2 }
@@ -346,7 +347,7 @@ private final class InputRecorder {
 }
 
 @Test func theGameLocksAndUnlocksTheCursor() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let activity = JavaMinecraftActivity()
     activity.lockCursor()
     #expect(JavaMinecraftActivity.cursorLocked)
@@ -357,7 +358,7 @@ private final class InputRecorder {
 // GameActivity's text input: the keyboard's edits on the game's text box.
 
 @Test func typingEditsTheTextAtTheCursor() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let connection = JavaTextInputConnection()
     connection.setState(JavaTextInputState(text: "My World", selectionStart: 2, selectionEnd: 2, composingRegionStart: -1, composingRegionEnd: -1))
     var state = connection.apply(.insert(" New"))
@@ -376,7 +377,7 @@ private final class InputRecorder {
 }
 
 @Test func aSelectionIsReplacedOrDeletedWhole() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let connection = JavaTextInputConnection()
     connection.setState(JavaTextInputState(text: "hello world", selectionStart: 6, selectionEnd: 11, composingRegionStart: -1, composingRegionEnd: -1))
     #expect(connection.apply(.insert("there")).text == "hello there")
@@ -386,7 +387,7 @@ private final class InputRecorder {
 }
 
 @Test func positionsCountUTF16AndPairsGoTogether() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let connection = JavaTextInputConnection()
     connection.setState(JavaTextInputState(text: "", selectionStart: 0, selectionEnd: 0, composingRegionStart: -1, composingRegionEnd: -1))
     var state = connection.apply(.insert("é🙂"))
@@ -398,7 +399,7 @@ private final class InputRecorder {
 }
 
 @Test func anOpenTextBoxTakesTypingAndLeavesOtherKeys() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     var edits: [TextEdit] = []
     var keys: [Int32] = []
     let input = GameActivityInput(sendMotion: { _ in }, sendKey: { keys.append($0.keyCode) }, editText: { edits.append($0) }, clock: { 0 })
@@ -434,7 +435,7 @@ private final class InputRecorder {
 // Minecraft's own text boxes: showKeyboard, and the whole text back.
 
 @Test func showKeyboardOpensTheBoxWithTheCaretAtTheEnd() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let box = TextBox()
     box.open(text: "My World", maxLength: 10)
     #expect(box.isActive && box.current.start == 8)
@@ -448,7 +449,7 @@ private final class InputRecorder {
 }
 
 @Test func minecraftsKeyboardCallsDriveItsBox() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     let activity = JavaMinecraftActivity()
     activity.showKeyboard("Seed", 32, false, false, false)
     #expect(JavaMinecraftActivity.textBox.isActive && activity.getCaretPosition() == 4)
@@ -459,7 +460,7 @@ private final class InputRecorder {
 }
 
 @Test func enterIsDoneWhenTheBoxTakesIt() {
-    JavaFramework.register()
+    MinecraftFramework.register()
     var edits: [TextEdit] = []
     var keys: [Int32] = []
     let input = GameActivityInput(sendMotion: { _ in }, sendKey: { keys.append($0.keyCode) }, editText: { edits.append($0) }, clock: { 0 })
@@ -474,4 +475,17 @@ private final class InputRecorder {
         input.handle(event, windowWidth: 100, windowHeight: 100)
     }
     #expect(edits == [.submit] && keys.isEmpty)
+}
+
+@Test func anIntArrayHoldsItsValues() {
+    MinecraftFramework.register()
+    let array = JavaRuntime.shared.newIntArray([3, -1, 7]) as? JavaPrimitiveArray
+    #expect(array?.count == 3)
+    let values = (0..<3).map { array!.storage.load(fromByteOffset: $0 * 4, as: Int32.self) }
+    #expect(values == [3, -1, 7])
+}
+
+@Test func anImageThatCannotBeReadIsNull() {
+    MinecraftFramework.register()
+    #expect(JavaMinecraftActivity().getImageData("/nonexistent/image.png") == nil)
 }
