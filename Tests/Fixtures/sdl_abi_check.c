@@ -70,6 +70,8 @@ SAME_FIELD(mead_sdl_mouse_button_event, SDL_MouseButtonEvent, button, button);
 SAME_FIELD(mead_sdl_mouse_button_event, SDL_MouseButtonEvent, down, down);
 SAME_FIELD(mead_sdl_mouse_button_event, SDL_MouseButtonEvent, x, x);
 SAME_FIELD(mead_sdl_mouse_button_event, SDL_MouseButtonEvent, y, y);
+SAME_FIELD(mead_sdl_mouse_motion_event, SDL_MouseMotionEvent, xrel, xrel);
+SAME_FIELD(mead_sdl_mouse_motion_event, SDL_MouseMotionEvent, yrel, yrel);
 SAME_FIELD(mead_sdl_mouse_wheel_event, SDL_MouseWheelEvent, x, x);
 SAME_FIELD(mead_sdl_mouse_wheel_event, SDL_MouseWheelEvent, y, y);
 SAME_FIELD(mead_sdl_mouse_wheel_event, SDL_MouseWheelEvent, direction, direction);
