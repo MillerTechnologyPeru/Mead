@@ -27,6 +27,7 @@ static const struct {
     { "libdl.so",         "libMeadBionic.so" },
     { "liblog.so",        "libMeadBionic.so" },
     { "libz.so",          "libMeadBionic.so" },
+    { "libstdc++.so",     "libMeadBionic.so" },
     { "libandroid.so",    "libMeadAndroid.so" },
     { "libmediandk.so",   "libMeadAndroid.so" },
     { "libjnigraphics.so","libMeadAndroid.so" },
