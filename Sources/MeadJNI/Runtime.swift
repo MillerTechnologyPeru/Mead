@@ -66,6 +66,12 @@ public final class JavaRuntime {
     private var started = false
     private var reported = Set<String>()
 
+    /// Finds a symbol in the loaded libraries, for natives bound by name.
+    public var nativeLookup: ((String) -> UnsafeMutableRawPointer?)?
+
+    /// The process's JavaVM.
+    public var vm: UnsafeMutablePointer<JavaVM?> { javaVM }
+
     var globals = ReferenceTable()
     var weaks = WeakReferenceTable()
 
@@ -83,6 +89,11 @@ public final class JavaRuntime {
         if strict {
             abort()
         }
+    }
+
+    /// `problemOnce`, for the framework classes.
+    public func problemOnceForFramework(_ text: String) {
+        problemOnce(text)
     }
 
     /// As `problem`, once per distinct message.
@@ -122,6 +133,7 @@ public final class JavaRuntime {
         ("java/lang/ArrayStoreException", "java/lang/RuntimeException"),
         ("java/lang/ClassCastException", "java/lang/RuntimeException"),
         ("java/lang/IllegalArgumentException", "java/lang/RuntimeException"),
+        ("java/lang/NumberFormatException", "java/lang/IllegalArgumentException"),
         ("java/lang/IllegalStateException", "java/lang/RuntimeException"),
         ("java/lang/IndexOutOfBoundsException", "java/lang/RuntimeException"),
         ("java/lang/NegativeArraySizeException", "java/lang/RuntimeException"),
@@ -133,6 +145,7 @@ public final class JavaRuntime {
         ("java/lang/NoSuchMethodException", "java/lang/Exception"),
         ("java/io/IOException", "java/lang/Exception"),
         ("java/lang/LinkageError", "java/lang/Error"),
+        ("java/lang/UnsatisfiedLinkError", "java/lang/LinkageError"),
         ("java/lang/NoClassDefFoundError", "java/lang/LinkageError"),
         ("java/lang/NoSuchFieldError", "java/lang/LinkageError"),
         ("java/lang/NoSuchMethodError", "java/lang/LinkageError"),
@@ -161,11 +174,45 @@ public final class JavaRuntime {
             definition.javaClass = classesByName["java/lang/Class"]
             classesByName[type.javaClassName] = definition
             classesBySwiftType[ObjectIdentifier(type)] = definition
+            definition.interfaces = type.javaInterfaceNames.compactMap { findClass(named: $0) }
             for member in type.javaMembers() {
                 definition.add(member)
             }
             return definition
         }
+    }
+
+    /// Declares a Java interface: what classes implement, and the methods
+    /// a call through it finds in the object's own class.
+    @discardableResult
+    public func defineInterface(_ name: String, extending parents: [String] = [], methods: [(name: String, signature: String)] = []) -> JavaClass {
+        start()
+        return lock.withLock {
+            if let existing = classesByName[name] {
+                return existing
+            }
+            let definition = JavaClass(name: name, superclass: classesByName["java/lang/Object"], swiftType: nil, isSynthesized: false)
+            definition.isInterface = true
+            definition.javaClass = classesByName["java/lang/Class"]
+            definition.interfaces = parents.compactMap { findClass(named: $0) }
+            for method in methods {
+                definition.methods[MemberKey(name: method.name, signature: method.signature)] =
+                    JavaMethod(name: method.name, signature: method.signature, isStatic: false, owner: definition, isSynthesized: false)
+            }
+            classesByName[name] = definition
+            return definition
+        }
+    }
+
+    /// The exported function that implements a native method, by JNI's
+    /// naming rule: the short name, then the one with the argument types.
+    func boundNative(owner: String, name: String, signature: String) -> UnsafeMutableRawPointer? {
+        guard let nativeLookup else { return nil }
+        let short = jniShortName(owner: owner, method: name)
+        if let found = nativeLookup(short) {
+            return found
+        }
+        return nativeLookup(jniLongName(owner: owner, method: name, signature: signature))
     }
 
     /// The class with `name`, if one exists.
@@ -197,6 +244,35 @@ public final class JavaRuntime {
     func allClasses() -> [JavaClass] {
         lock.withLock { Array(classesByName.values) }
     }
+}
+
+/// JNI's escaping of a class or method name into a C identifier.
+func jniMangled(_ text: String) -> String {
+    var result = ""
+    for unit in text.utf16 {
+        switch unit {
+        case UInt16(UInt8(ascii: "/")): result += "_"
+        case UInt16(UInt8(ascii: "_")): result += "_1"
+        case UInt16(UInt8(ascii: ";")): result += "_2"
+        case UInt16(UInt8(ascii: "[")): result += "_3"
+        case 0x30...0x39, 0x41...0x5a, 0x61...0x7a:
+            result.unicodeScalars.append(UnicodeScalar(unit)!)
+        default:
+            let digits = String(unit, radix: 16)
+            result += "_0" + String(repeating: "0", count: 4 - digits.count) + digits
+        }
+    }
+    return result
+}
+
+func jniShortName(owner: String, method: String) -> String {
+    "Java_\(jniMangled(owner))_\(jniMangled(method))"
+}
+
+func jniLongName(owner: String, method: String, signature: String) -> String {
+    let start = signature.index(after: signature.startIndex)
+    let end = signature.firstIndex(of: ")") ?? signature.endIndex
+    return "\(jniShortName(owner: owner, method: method))__\(jniMangled(String(signature[start..<end])))"
 }
 
 extension String {
