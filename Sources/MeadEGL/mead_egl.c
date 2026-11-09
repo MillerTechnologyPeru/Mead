@@ -74,6 +74,8 @@ static bool native_window(void *window, mead_native_window *out) {
 // window is on, as an EGL display on anything else could not draw to it.
 static EGLDisplay shim_eglGetDisplay(void *display) {
     HOST("eglGetDisplay", EGLDisplay (*)(void *))
+    if (mead_graphics_api() == MEAD_GRAPHICS_VULKAN)
+        return NULL; // EGL_NO_DISPLAY: Vulkan was chosen, so there is no GLES
     if (display == NULL) {
         mead_native_window native;
         if (native_window(NULL, &native))
