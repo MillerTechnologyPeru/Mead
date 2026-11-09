@@ -10,6 +10,7 @@
 #include <android/log.h>
 #include <android/looper.h>
 #include <android/native_window.h>
+#include <android/sensor.h>
 #include <android_native_app_glue.h>
 #include <dlfcn.h>
 #include <jni.h>
@@ -29,10 +30,12 @@
 
 void mead_android_inject_key(uint32_t scancode, bool down);
 void mead_android_inject_touch(float x, float y, bool down);
+void mead_android_inject_gamepad_button(uint8_t button, bool down);
+void mead_android_inject_gamepad_axis(uint8_t axis, int16_t value);
 
 enum { SCANCODE_A = 4, KEYCODE_A = 29 };
 
-static bool window_ready, saw_key, saw_touch, finished;
+static bool window_ready, saw_key, saw_touch, saw_button, saw_axis, finished;
 
 static void test_assets(struct android_app *app) {
     AAssetManager *manager = app->activity->assetManager;
@@ -183,10 +186,26 @@ static void test_configuration(struct android_app *app) {
     CHECK(AConfiguration_getSdkVersion(app->config) >= 21);
 }
 
+static void test_sensors(void) {
+    // A laptop's worth of sensors: none, but asking is not an error.
+    ASensorManager *manager = ASensorManager_getInstanceForPackage("com.mead.app");
+    CHECK(manager != NULL);
+    ASensorList list = NULL;
+    CHECK(ASensorManager_getSensorList(manager, &list) == 0);
+    CHECK(ASensorManager_getDefaultSensor(manager, ASENSOR_TYPE_ACCELEROMETER) == NULL);
+    ASensorEventQueue *queue = ASensorManager_createEventQueue(manager, ALooper_forThread(), 7, NULL, NULL);
+    CHECK(queue != NULL);
+    CHECK(ASensorEventQueue_hasEvents(queue) == 0);
+    ASensorEvent event;
+    CHECK(ASensorEventQueue_getEvents(queue, &event, 1) == 0);
+    CHECK(ASensorManager_destroyEventQueue(manager, queue) == 0);
+}
+
 static void maybe_finish(struct android_app *app) {
-    if (finished || !saw_key || !saw_touch)
+    if (finished || !saw_key || !saw_touch || !saw_button || !saw_axis)
         return;
     finished = true;
+    test_sensors();
     test_assets(app);
     test_configuration(app);
     test_java(app);
@@ -205,11 +224,25 @@ static void on_command(struct android_app *app, int32_t command) {
     window_ready = true;
     mead_android_inject_key(SCANCODE_A, true);
     mead_android_inject_touch(100.0f, 50.0f, true);
+    mead_android_inject_gamepad_button(0, true); // SDL's south face button
+    mead_android_inject_gamepad_axis(0, 32767);  // left stick, fully right
+    mead_android_inject_gamepad_axis(4, 32767);  // left trigger, fully in
 }
 
 static int32_t on_input(struct android_app *app, AInputEvent *event) {
     CHECK(window_ready);
-    if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
+    if (AInputEvent_getSource(event) == AINPUT_SOURCE_GAMEPAD) {
+        CHECK(AKeyEvent_getKeyCode(event) == AKEYCODE_BUTTON_A);
+        CHECK(AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN);
+        saw_button = true;
+    } else if (AInputEvent_getSource(event) == AINPUT_SOURCE_JOYSTICK) {
+        CHECK(AMotionEvent_getAction(event) == AMOTION_EVENT_ACTION_MOVE);
+        CHECK(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_X, 0) == 1.0f);
+        if (AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_LTRIGGER, 0) == 1.0f) {
+            CHECK(AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_BRAKE, 0) == 1.0f);
+            saw_axis = true;
+        }
+    } else if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_KEY) {
         CHECK(AKeyEvent_getKeyCode(event) == KEYCODE_A);
         CHECK(AKeyEvent_getAction(event) == AKEY_EVENT_ACTION_DOWN);
         saw_key = true;
