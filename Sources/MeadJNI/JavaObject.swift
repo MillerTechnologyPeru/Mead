@@ -176,6 +176,11 @@ public final class JavaClass: JavaObject {
     public override class var javaSuperclassType: JavaObject.Type? { JavaObject.self }
     public override class func javaMembers() -> [JavaMember] {
         [
+            .method(name: "getClassLoader", signature: "()Ljava/lang/ClassLoader;", isStatic: false) { thread, _, _ in
+                var value = jvalue()
+                value.l = thread.newLocal(JavaRuntime.shared.classLoaderFactory?())
+                return value
+            },
             .method(name: "getName", signature: "()Ljava/lang/String;", isStatic: false) { thread, receiver, _ in
                 var value = jvalue()
                 value.l = thread.newLocal(JavaString((receiver as! JavaClass).name.replacingSlashes()))
