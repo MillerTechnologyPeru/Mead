@@ -7,8 +7,8 @@ import MeadWindow
 /// onTouchEvent, onGenericMotionEvent and onKeyDown/onKeyUp.
 ///
 /// The mouse is a mouse, as on a Chromebook: button presses and releases with
-/// the buttons held, hover moves, and the wheel scrolling. That is how
-/// mcpelauncher feeds Minecraft too. Real touches are fingers, kept apart in
+/// the buttons held, hover moves, and the wheel scrolling; while the game has
+/// it captured, moves are movement. That is how mcpelauncher feeds Minecraft too. Real touches are fingers, kept apart in
 /// Android's multi-pointer way.
 final class GameActivityInput {
     private let sendMotion: (JavaMotionEvent) -> Void
@@ -19,6 +19,9 @@ final class GameActivityInput {
     private var touches: [(key: UInt64, pointer: JavaMotionEvent.Pointer)] = []
     private var touchDownTime: Int64 = 0
     private var keyDownTimes: [UInt32: Int64] = [:]
+    /// Set while the game has the pointer captured: motion then goes as
+    /// movement, from the relative mouse, as Android delivers captured events.
+    var pointerCaptured = false
     private var mouseButtons: Int32 = 0
     private var mouseDownTime: Int64 = 0
 
@@ -61,7 +64,14 @@ final class GameActivityInput {
             mouse(button.down ? JavaMotionEvent.actionButtonPress : JavaMotionEvent.actionButtonRelease, x: button.x * scale, y: button.y * scale,
                   time: time, actionButton: android)
         case MEAD_SDL_EVENT_MOUSE_MOTION:
-            mouse(JavaMotionEvent.actionHoverMove, x: event.motion.x * scale, y: event.motion.y * scale, time: time)
+            if pointerCaptured {
+                sendMotion(JavaMotionEvent(action: JavaMotionEvent.actionHoverMove, source: JavaMotionEvent.sourceMouseRelative,
+                                           eventTime: time, downTime: time, buttonState: mouseButtons,
+                                           pointers: [JavaMotionEvent.Pointer(id: 0, toolType: JavaMotionEvent.toolTypeMouse,
+                                                                              x: event.motion.xrel * scale, y: event.motion.yrel * scale)]))
+            } else {
+                mouse(JavaMotionEvent.actionHoverMove, x: event.motion.x * scale, y: event.motion.y * scale, time: time)
+            }
         case MEAD_SDL_EVENT_MOUSE_WHEEL:
             let wheel = event.wheel
             let flip: Float = wheel.direction == UInt32(MEAD_SDL_MOUSEWHEEL_FLIPPED) ? -1 : 1
