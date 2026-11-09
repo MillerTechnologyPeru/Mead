@@ -313,6 +313,15 @@ private func long(_ value: Int64) -> jvalue {
     #expect(thread.pending?.javaClass.name == "java/lang/ArrayIndexOutOfBoundsException")
 }
 
+// MARK: Binding natives by name
+
+@Test func nativeNamesAreMangledAsJNISays() {
+    #expect(jniShortName(owner: "com/foo/Bar", method: "baz") == "Java_com_foo_Bar_baz")
+    #expect(jniShortName(owner: "com/foo_bar/Baz$Inner", method: "qu_x") == "Java_com_foo_1bar_Baz_00024Inner_qu_1x")
+    #expect(jniLongName(owner: "a/B", method: "c", signature: "(I[Ljava/lang/String;)V") == "Java_a_B_c__I_3Ljava_lang_String_2")
+    #expect(jniLongName(owner: "a/B", method: "c", signature: "()V") == "Java_a_B_c__")
+}
+
 // MARK: Tracing
 
 @Test func theTracedStubsAreRealClasses() {
