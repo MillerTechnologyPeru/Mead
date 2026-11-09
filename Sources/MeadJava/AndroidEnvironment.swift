@@ -78,7 +78,7 @@ public enum JavaFramework {
             JavaNumber.self, JavaInteger.self, JavaLong.self, JavaFloat.self, JavaDouble.self, JavaBoolean.self,
             JavaSystem.self, JavaLangThread.self, JavaArrayList.self, JavaHashMap.self, JavaUUID.self, JavaLocale.self,
             JavaFile.self, JavaAssetManager.self, JavaContext.self, JavaContextWrapper.self, JavaActivity.self,
-            JavaNativeActivity.self, JavaBuild.self, JavaBuildVersion.self, JavaSurface.self, JavaFMOD.self,
+            JavaNativeActivity.self, JavaBuild.self, JavaBuildVersion.self, JavaSurface.self, JavaFMOD.self, JavaPairipVMRunner.self,
         ]
         for type in classes {
             runtime.defineClass(for: type)
