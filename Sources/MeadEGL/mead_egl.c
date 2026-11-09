@@ -133,11 +133,54 @@ static EGLBoolean shim_eglGetConfigAttrib(EGLDisplay display, EGLConfig config, 
 
 static void *shim_eglGetProcAddress(const char *name);
 
+// MEAD_FRAME_DUMP=path — writes the frame about to be shown to `path` as a
+// binary PPM, every 60 swaps. A debugging aid for hosts with no way to look
+// at the screen: nothing runs it unless the variable is set.
+static void dump_frame(EGLDisplay display, EGLSurface surface) {
+    static unsigned swaps;
+    const char *path = getenv("MEAD_FRAME_DUMP");
+    if (!path || swaps++ % 60 != 0)
+        return;
+    HOST("eglQuerySurface", EGLBoolean (*)(EGLDisplay, EGLSurface, EGLint, EGLint *))
+    EGLint width = 0, height = 0;
+    if (!host(display, surface, 0x3057 /* EGL_WIDTH */, &width) || !host(display, surface, 0x3056 /* EGL_HEIGHT */, &height) ||
+        width <= 0 || height <= 0)
+        return;
+    void (*get_integer)(unsigned, int *) = (void (*)(unsigned, int *))dlsym(gles2_library, "glGetIntegerv");
+    void (*bind_framebuffer)(unsigned, unsigned) = (void (*)(unsigned, unsigned))dlsym(gles2_library, "glBindFramebuffer");
+    void (*read_pixels)(int, int, int, int, unsigned, unsigned, void *) =
+        (void (*)(int, int, int, int, unsigned, unsigned, void *))dlsym(gles2_library, "glReadPixels");
+    unsigned char *pixels = malloc((size_t)width * (size_t)height * 4);
+    FILE *file = fopen(path, "wb");
+    if (get_integer && bind_framebuffer && read_pixels && pixels && file) {
+        int bound = 0;
+        get_integer(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */, &bound);
+        bind_framebuffer(0x8CA8 /* GL_READ_FRAMEBUFFER */, 0);
+        read_pixels(0, 0, width, height, 0x1908 /* GL_RGBA */, 0x1401 /* GL_UNSIGNED_BYTE */, pixels);
+        bind_framebuffer(0x8CA8, (unsigned)bound);
+        fprintf(file, "P6\n%d %d\n255\n", width, height);
+        for (EGLint row = height - 1; row >= 0; row--)
+            for (EGLint column = 0; column < width; column++)
+                fwrite(pixels + ((size_t)row * (size_t)width + (size_t)column) * 4, 1, 3, file);
+    }
+    if (file)
+        fclose(file);
+    free(pixels);
+}
+
+static EGLBoolean shim_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
+    HOST("eglSwapBuffers", EGLBoolean (*)(EGLDisplay, EGLSurface))
+    dump_frame(display, surface);
+    return host(display, surface);
+}
+
 static void *shim_for(const char *name) {
     if (strcmp(name, "eglGetDisplay") == 0)
         return (void *)shim_eglGetDisplay;
     if (strcmp(name, "eglCreateWindowSurface") == 0)
         return (void *)shim_eglCreateWindowSurface;
+    if (strcmp(name, "eglSwapBuffers") == 0)
+        return (void *)shim_eglSwapBuffers;
     if (strcmp(name, "eglChooseConfig") == 0)
         return (void *)shim_eglChooseConfig;
     if (strcmp(name, "eglGetConfigAttrib") == 0)
