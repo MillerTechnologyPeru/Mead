@@ -3,6 +3,7 @@ import Glibc
 import MeadInterface
 import MeadJNI
 import MeadJava
+import MeadMinecraft
 import MeadWindow
 
 /// Runs a game built on the Android Game SDK's GameActivity, playing the part
