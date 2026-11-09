@@ -30,6 +30,14 @@ Scripts/check-android-abi.sh
 SDL_VIDEODRIVER=dummy MEAD_DATA_DIR=$fixtures/app timeout 60 "$bin/mead" $fixtures/libfixture_glue.so
 echo "a native_app_glue app ran from window to exit"
 
+# Audio, written to a file by SDL's disk driver for the app to check, and
+# read back from one for recording.
+head -c 384000 /dev/zero | tr '\0' 'A' > $fixtures/audio-in.raw
+SDL_AUDIO_DRIVER=disk SDL_AUDIO_DISK_OUTPUT_FILE=$fixtures/audio-out.raw \
+    SDL_AUDIO_DISK_INPUT_FILE=$fixtures/audio-in.raw timeout 60 \
+    "$bin/mead" --selftest $fixtures/libfixture_audio.so
+echo "OpenSL ES and AAudio played and recorded the right samples"
+
 # Rendering, for real, in Mesa's software drivers on a virtual X server.
 run_app() {
     SDL_VIDEODRIVER=x11 LIBGL_ALWAYS_SOFTWARE=1 MEAD_DATA_DIR=$fixtures/app \
