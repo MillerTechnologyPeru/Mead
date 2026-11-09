@@ -98,7 +98,7 @@ public enum JavaFramework {
             JavaClassLoader.self, JavaConfiguration.self, JavaInsets.self, JavaDisplay.self, JavaWindowManager.self,
             JavaGameActivity.self, JavaMinecraftActivity.self, JavaCrashManager.self, JavaAppExitInfoHelper.self,
             JavaHardwareInformation.self, JavaBatteryMonitor.self, JavaThermalMonitor.self, JavaDateTimeHelper.self,
-            JavaTextInputConnection.self, JavaNetworkMonitor.self, JavaBase64.self, JavaArrays.self,
+            JavaTextInputConnection.self, JavaTextInputState.self, JavaNetworkMonitor.self, JavaBase64.self, JavaArrays.self,
             JavaX509EncodedKeySpec.self, JavaRSAPublicKey.self, JavaKeyFactory.self, JavaSignature.self, JavaNativeStoreListener.self, JavaExtraLicenseResponseData.self, JavaStore.self, JavaStoreFactory.self,
             JavaHttpClientRequest.self, JavaMotionEvent.self, JavaKeyEvent.self,
         ]
