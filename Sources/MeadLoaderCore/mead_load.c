@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 // The loader's top level: map, lay out TLS, bind, make the images runnable,
@@ -150,6 +151,63 @@ static void initialize(mead_image *image) {
     run_initializers(image);
 }
 
+// Overwrites instructions in a bound image.
+static void write_code(uint32_t *code, const uint32_t *words, size_t count) {
+    uint64_t page = (uint64_t)(uintptr_t)code & ~(uint64_t)4095;
+    mprotect((void *)(uintptr_t)page, 8192, PROT_READ | PROT_WRITE | PROT_EXEC);
+    memcpy(code, words, count * sizeof(uint32_t));
+    __builtin___clear_cache((char *)code, (char *)(code + count));
+    mprotect((void *)(uintptr_t)page, 8192, PROT_READ | PROT_EXEC);
+}
+
+// Functions that return at once, wherever an image defines them. Microsoft's
+// telemetry is the one so far: it has no business reporting from a host
+// that isn't what it thinks it is, and on the Minecraft versions protected by
+// pairip, the SQLite it would open keeps its state in encrypted data.
+static const char *const skipped_functions[] = {
+    "_ZN9Microsoft12Applications6Events19TelemetrySystemBase5startEv",
+};
+
+static void skip_functions(mead_image *image) {
+    static const uint32_t return_zero[] = { 0xd2800000, 0xd65f03c0 }; // mov x0, #0; ret
+    for (size_t index = 0; index < sizeof(skipped_functions) / sizeof(skipped_functions[0]); index++) {
+        const Elf64_Sym *symbol = mead_symbols_find(image, skipped_functions[index]);
+        if (symbol && symbol->st_shndx != SHN_UNDEF && symbol->st_size >= sizeof(return_zero))
+            write_code(mead_image_symbol_address(image, symbol), return_zero,
+                       sizeof(return_zero) / sizeof(return_zero[0]));
+    }
+}
+
+// MEAD_DEBUG_PATCH=library:offset:word,word — overwrites instructions in a
+// bound image, for getting past one known fault to see what comes after it.
+// A debugging aid only: nothing runs it unless the variable is set.
+static void apply_debug_patch(mead_image *image, const char *patch) {
+    if (!patch)
+        return;
+    const char *colon = strchr(patch, ':');
+    if (!colon || !image->soname || strncmp(image->soname, patch, (size_t)(colon - patch)) != 0)
+        return;
+    char *rest = NULL;
+    uint64_t offset = strtoull(colon + 1, &rest, 16);
+    if (!rest || *rest != ':')
+        return;
+    uint32_t words[64];
+    size_t count = 0;
+    while ((*rest == ':' || *rest == ',') && count < sizeof(words) / sizeof(words[0]))
+        words[count++] = (uint32_t)strtoul(rest + 1, &rest, 16);
+    write_code(mead_image_address(image, offset), words, count);
+    fprintf(stderr, "mead: patched %zu instructions in %s at 0x%lx\n", count, image->soname, (unsigned long)offset);
+}
+
+// MEAD_DEBUG_PATCH_LATE, the same thing, when `kill -USR2` asks: for catching
+// a function on a call that comes long after the first.
+void mead_apply_late_debug_patch(void) {
+    size_t count = 0;
+    mead_image *const *images = mead_deps_images(&count);
+    for (size_t index = 0; index < count; index++)
+        apply_debug_patch(images[index], getenv("MEAD_DEBUG_PATCH_LATE"));
+}
+
 void mead_bind_loaded(void) {
     mead_deps_lock();
     size_t count = 0;
@@ -158,6 +216,8 @@ void mead_bind_loaded(void) {
     for (; bound_through < count; bound_through++) {
         mead_fixups_apply(images[bound_through]);
         mead_image_protect(images[bound_through]);
+        skip_functions(images[bound_through]);
+        apply_debug_patch(images[bound_through], getenv("MEAD_DEBUG_PATCH"));
     }
     mead_deps_unlock();
 }
