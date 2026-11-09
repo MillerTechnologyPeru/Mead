@@ -1,10 +1,21 @@
 import CMeadAndroid
 import Glibc
+import MeadWindow
 
 let AINPUT_EVENT_TYPE_KEY: Int32 = 1
 let AINPUT_EVENT_TYPE_MOTION: Int32 = 2
 let AINPUT_SOURCE_KEYBOARD: Int32 = 0x101
 let AINPUT_SOURCE_TOUCHSCREEN: Int32 = 0x1002
+let AINPUT_SOURCE_GAMEPAD: Int32 = 0x401
+let AINPUT_SOURCE_JOYSTICK: Int32 = 0x0100_0010
+let AMOTION_EVENT_AXIS_X: Int32 = 0
+let AMOTION_EVENT_AXIS_Y: Int32 = 1
+let AMOTION_EVENT_AXIS_Z: Int32 = 11
+let AMOTION_EVENT_AXIS_RZ: Int32 = 14
+let AMOTION_EVENT_AXIS_LTRIGGER: Int32 = 17
+let AMOTION_EVENT_AXIS_RTRIGGER: Int32 = 18
+let AMOTION_EVENT_AXIS_GAS: Int32 = 22
+let AMOTION_EVENT_AXIS_BRAKE: Int32 = 23
 let AKEY_EVENT_ACTION_DOWN: Int32 = 0
 let AKEY_EVENT_ACTION_UP: Int32 = 1
 let AMOTION_EVENT_ACTION_DOWN: Int32 = 0
@@ -25,9 +36,13 @@ public final class InputEvent {
     // Motion.
     public let x: Float
     public let y: Float
+    /// A gamepad's axes, by Android's axis numbers; a finger has only x and y.
+    public let axes: [Int32: Float]
+    public let deviceId: Int32
 
     init(type: Int32, source: Int32, action: Int32, eventTime: Int64, downTime: Int64,
-         keyCode: Int32 = 0, scanCode: Int32 = 0, repeatCount: Int32 = 0, x: Float = 0, y: Float = 0) {
+         keyCode: Int32 = 0, scanCode: Int32 = 0, repeatCount: Int32 = 0, x: Float = 0, y: Float = 0,
+         axes: [Int32: Float] = [:], deviceId: Int32 = 1) {
         self.type = type
         self.source = source
         self.action = action
@@ -38,6 +53,8 @@ public final class InputEvent {
         self.repeatCount = repeatCount
         self.x = x
         self.y = y
+        self.axes = axes
+        self.deviceId = deviceId
     }
 }
 
@@ -135,7 +152,7 @@ public func AInputQueue_finishEvent(_ pointer: UnsafeMutableRawPointer, _ event:
 public func AInputEvent_getType(_ pointer: UnsafeMutableRawPointer) -> Int32 { event(pointer).type }
 
 @_cdecl("AInputEvent_getDeviceId")
-public func AInputEvent_getDeviceId(_ pointer: UnsafeMutableRawPointer) -> Int32 { 1 }
+public func AInputEvent_getDeviceId(_ pointer: UnsafeMutableRawPointer) -> Int32 { event(pointer).deviceId }
 
 @_cdecl("AInputEvent_getSource")
 public func AInputEvent_getSource(_ pointer: UnsafeMutableRawPointer) -> Int32 { event(pointer).source }
@@ -204,7 +221,9 @@ public func AMotionEvent_getPointerCount(_ pointer: UnsafeMutableRawPointer) -> 
 public func AMotionEvent_getPointerId(_ pointer: UnsafeMutableRawPointer, _ index: Int) -> Int32 { 0 }
 
 @_cdecl("AMotionEvent_getToolType")
-public func AMotionEvent_getToolType(_ pointer: UnsafeMutableRawPointer, _ index: Int) -> Int32 { 1 } // finger
+public func AMotionEvent_getToolType(_ pointer: UnsafeMutableRawPointer, _ index: Int) -> Int32 {
+    event(pointer).axes.isEmpty ? 1 : 0 // a finger, or nothing that is one
+}
 
 @_cdecl("AMotionEvent_getRawX")
 public func AMotionEvent_getRawX(_ pointer: UnsafeMutableRawPointer, _ index: Int) -> Float { event(pointer).x }
@@ -229,12 +248,56 @@ public func AMotionEvent_getHistorySize(_ pointer: UnsafeMutableRawPointer) -> I
 
 @_cdecl("AMotionEvent_getAxisValue")
 public func AMotionEvent_getAxisValue(_ pointer: UnsafeMutableRawPointer, _ axis: Int32, _ index: Int) -> Float {
+    if !event(pointer).axes.isEmpty {
+        return event(pointer).axes[axis] ?? 0
+    }
     switch axis {
     case 0: return event(pointer).x
     case 1: return event(pointer).y
     case 2: return 1
     default: return 0
     }
+}
+
+/// SDL's gamepad buttons as Android's key codes.
+public func androidKeyCode(forGamepadButton button: UInt8) -> Int32 {
+    switch Int(button) {
+    case MEAD_SDL_GAMEPAD_BUTTON_SOUTH: return 96 // A
+    case MEAD_SDL_GAMEPAD_BUTTON_EAST: return 97 // B
+    case MEAD_SDL_GAMEPAD_BUTTON_WEST: return 99 // X
+    case MEAD_SDL_GAMEPAD_BUTTON_NORTH: return 100 // Y
+    case MEAD_SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return 102 // L1
+    case MEAD_SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return 103 // R1
+    case MEAD_SDL_GAMEPAD_BUTTON_LEFT_STICK: return 106
+    case MEAD_SDL_GAMEPAD_BUTTON_RIGHT_STICK: return 107
+    case MEAD_SDL_GAMEPAD_BUTTON_START: return 108
+    case MEAD_SDL_GAMEPAD_BUTTON_BACK: return 109 // select
+    case MEAD_SDL_GAMEPAD_BUTTON_GUIDE: return 110 // mode
+    case MEAD_SDL_GAMEPAD_BUTTON_DPAD_UP: return 19
+    case MEAD_SDL_GAMEPAD_BUTTON_DPAD_DOWN: return 20
+    case MEAD_SDL_GAMEPAD_BUTTON_DPAD_LEFT: return 21
+    case MEAD_SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return 22
+    default: return 0
+    }
+}
+
+/// Android's axes for one of SDL's: triggers are reported under two names,
+/// as Android's own drivers do.
+public func androidAxes(forGamepadAxis axis: UInt8) -> [Int32] {
+    switch Int(axis) {
+    case MEAD_SDL_GAMEPAD_AXIS_LEFTX: return [AMOTION_EVENT_AXIS_X]
+    case MEAD_SDL_GAMEPAD_AXIS_LEFTY: return [AMOTION_EVENT_AXIS_Y]
+    case MEAD_SDL_GAMEPAD_AXIS_RIGHTX: return [AMOTION_EVENT_AXIS_Z]
+    case MEAD_SDL_GAMEPAD_AXIS_RIGHTY: return [AMOTION_EVENT_AXIS_RZ]
+    case MEAD_SDL_GAMEPAD_AXIS_LEFT_TRIGGER: return [AMOTION_EVENT_AXIS_LTRIGGER, AMOTION_EVENT_AXIS_BRAKE]
+    case MEAD_SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: return [AMOTION_EVENT_AXIS_RTRIGGER, AMOTION_EVENT_AXIS_GAS]
+    default: return []
+    }
+}
+
+/// SDL's axis range as Android's: -1 to 1, or 0 to 1 for a trigger.
+public func androidAxisValue(_ value: Int16) -> Float {
+    max(Float(value) / 32767, -1)
 }
 
 /// SDL's keyboard scancodes as Android's key codes; those Android has.
