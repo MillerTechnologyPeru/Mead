@@ -13,7 +13,14 @@ import MeadWindow
 final class GameActivityInput {
     private let sendMotion: (JavaMotionEvent) -> Void
     private let sendKey: (JavaKeyEvent) -> Void
+    private let editText: (TextEdit) -> Void
     private let clock: () -> Int64
+    /// Set while the game has a text box open: typing then edits its text,
+    /// as Android's keyboard would, instead of arriving as key presses.
+    var textInputActive = false
+    /// Set when the open box takes Enter as "done", as an Android text field
+    /// does, rather than leaving it a key press.
+    var textInputTakesReturn = false
 
     /// Fingers down, in the order Android lists them: by pointer ID.
     private var touches: [(key: UInt64, pointer: JavaMotionEvent.Pointer)] = []
@@ -26,9 +33,10 @@ final class GameActivityInput {
     private var mouseDownTime: Int64 = 0
 
     init(sendMotion: @escaping (JavaMotionEvent) -> Void, sendKey: @escaping (JavaKeyEvent) -> Void,
-         clock: @escaping () -> Int64 = GameActivityInput.uptimeMillis) {
+         editText: @escaping (TextEdit) -> Void = { _ in }, clock: @escaping () -> Int64 = GameActivityInput.uptimeMillis) {
         self.sendMotion = sendMotion
         self.sendKey = sendKey
+        self.editText = editText
         self.clock = clock
     }
 
@@ -85,8 +93,21 @@ final class GameActivityInput {
             let finger = event.finger
             touch(key: finger.fingerID, down: Int(event.type) == MEAD_SDL_EVENT_FINGER_DOWN, up: Int(event.type) == MEAD_SDL_EVENT_FINGER_UP,
                   x: finger.x * windowWidth, y: finger.y * windowHeight, time: time)
+        case MEAD_SDL_EVENT_TEXT_INPUT:
+            if textInputActive, let text = event.text.text {
+                editText(.insert(String(cString: text)))
+            }
         case MEAD_SDL_EVENT_KEY_DOWN, MEAD_SDL_EVENT_KEY_UP:
             let key = event.key
+            if textInputActive, textInputTakesReturn, key.scancode == 40 || key.scancode == 88 {  // Enter, keypad Enter
+                if key.down { editText(.submit) }
+                return
+            }
+            if textInputActive, let edit = Self.textEdit(scancode: key.scancode, typed: key.key, mod: key.mod) {
+                // A keyboard's own work: the game hears the result, not the key.
+                if key.down, let edit = edit { editText(edit) }
+                return
+            }
             let code = androidKeyCode(forScancode: key.scancode)
             guard code != 0 else { break }
             if key.down, !key.repeat { keyDownTimes[key.scancode] = time }
@@ -132,6 +153,23 @@ final class GameActivityInput {
         sendMotion(JavaMotionEvent(action: action, source: JavaMotionEvent.sourceTouchscreen, eventTime: time, downTime: touchDownTime,
                                    pointers: touches.map(\.pointer)))
         if up { touches.remove(at: index) }
+    }
+
+    /// While a text box is open, what a key does to its text: an edit, nil
+    /// inside for a key whose typing arrives as text input, or nil outright
+    /// for a key that stays a key press (Enter, Escape, Tab, function keys).
+    static func textEdit(scancode: UInt32, typed: UInt32, mod: UInt16) -> TextEdit?? {
+        switch scancode {
+        case 42: return .some(.deleteBackward)  // Backspace
+        case 76: return .some(.deleteForward)   // Delete
+        case 80: return .some(.moveLeft)
+        case 79: return .some(.moveRight)
+        case 74: return .some(.moveToStart)     // Home
+        case 77: return .some(.moveToEnd)       // End
+        default:
+            let control = Int(mod) & (MEAD_SDL_KMOD_LCTRL | MEAD_SDL_KMOD_RCTRL | MEAD_SDL_KMOD_LGUI | MEAD_SDL_KMOD_RGUI) != 0
+            return typed >= 0x20 && typed < 0x7f && !control ? .some(nil) : nil
+        }
     }
 
     static func metaState(_ mod: UInt16) -> Int32 {
