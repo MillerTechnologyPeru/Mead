@@ -24,6 +24,7 @@ enum {
     VK_ERROR_OUT_OF_HOST_MEMORY = -1,
     VK_ERROR_INITIALIZATION_FAILED = -3,
     VK_ERROR_EXTENSION_NOT_PRESENT = -7,
+    VK_ERROR_INCOMPATIBLE_DRIVER = -9,
     VK_STRUCTURE_TYPE_XLIB_SURFACE_CREATE_INFO_KHR = 1000004000,
     VK_STRUCTURE_TYPE_WAYLAND_SURFACE_CREATE_INFO_KHR = 1000006000,
 };
@@ -103,6 +104,28 @@ static bool native_window(void *window, mead_native_window *out) {
     return describe && describe(window, out);
 }
 
+// SDL, for when the window was made for Vulkan: it knows what its video
+// driver's surfaces need, and works on whichever driver is in use.
+typedef const char *const *(*SDLGetInstanceExtensions)(uint32_t *);
+typedef bool (*SDLCreateSurface)(void *, VkInstance, const void *, VkSurfaceKHR *);
+
+static SDLGetInstanceExtensions sdl_get_instance_extensions;
+static SDLCreateSurface sdl_create_surface;
+
+static void open_sdl(void) {
+    void *sdl = dlopen("libSDL3.so.0", RTLD_NOW);
+    if (!sdl)
+        return;
+    sdl_get_instance_extensions = (SDLGetInstanceExtensions)dlsym(sdl, "SDL_Vulkan_GetInstanceExtensions");
+    sdl_create_surface = (SDLCreateSurface)dlsym(sdl, "SDL_Vulkan_CreateSurface");
+}
+
+static bool ensure_sdl(void) {
+    static pthread_once_t once = PTHREAD_ONCE_INIT;
+    pthread_once(&once, open_sdl);
+    return sdl_get_instance_extensions && sdl_create_surface;
+}
+
 static bool is_host_surface_extension(const char *name) {
     return strcmp(name, XLIB_SURFACE) == 0 || strcmp(name, WAYLAND_SURFACE) == 0 || strcmp(name, XCB_SURFACE) == 0;
 }
@@ -160,24 +183,46 @@ static VkResult shim_vkCreateInstance(const VkInstanceCreateInfo *info, const vo
     typedef VkResult (*Create)(const VkInstanceCreateInfo *, const void *, VkInstance *);
     Create host = (Create)host_get_instance_proc_addr(NULL, "vkCreateInstance");
 
+    int api = mead_graphics_api();
+    if (api == MEAD_GRAPHICS_GLES)
+        return VK_ERROR_INCOMPATIBLE_DRIVER; // as on a device with no Vulkan
+
+    uint32_t sdl_count = 0;
+    const char *const *sdl_names = NULL;
+    if (api == MEAD_GRAPHICS_VULKAN) {
+        if (!ensure_sdl() || !(sdl_names = sdl_get_instance_extensions(&sdl_count)))
+            return VK_ERROR_INITIALIZATION_FAILED;
+    }
+
     mead_native_window native;
     native_window(NULL, &native);
     uint32_t count = info->enabledExtensionCount;
-    const char **names = calloc(count ? count : 1, sizeof(*names));
+    const char **names = calloc(count + sdl_count + 1, sizeof(*names));
     if (!names)
         return VK_ERROR_OUT_OF_HOST_MEMORY;
+    uint32_t kept = 0;
     for (uint32_t index = 0; index < count; index++) {
         const char *name = info->ppEnabledExtensionNames[index];
         if (strcmp(name, ANDROID_SURFACE) == 0) {
+            if (sdl_names)
+                continue; // SDL's list, below, has what this stands for
             if (native.kind == MEAD_NATIVE_WINDOW_NONE) {
                 free(names);
                 return VK_ERROR_EXTENSION_NOT_PRESENT;
             }
             name = native.kind == MEAD_NATIVE_WINDOW_X11 ? XLIB_SURFACE : WAYLAND_SURFACE;
         }
-        names[index] = name;
+        names[kept++] = name;
+    }
+    for (uint32_t index = 0; index < sdl_count; index++) {
+        bool present = false;
+        for (uint32_t other = 0; other < kept && !present; other++)
+            present = strcmp(names[other], sdl_names[index]) == 0;
+        if (!present)
+            names[kept++] = sdl_names[index];
     }
     VkInstanceCreateInfo changed = *info;
+    changed.enabledExtensionCount = kept;
     changed.ppEnabledExtensionNames = names;
     VkResult result = host(&changed, allocator, instance);
     free(names);
@@ -186,6 +231,14 @@ static VkResult shim_vkCreateInstance(const VkInstanceCreateInfo *info, const vo
 
 static VkResult shim_vkCreateAndroidSurfaceKHR(VkInstance instance, const VkAndroidSurfaceCreateInfoKHR *info,
                                                const void *allocator, VkSurfaceKHR *surface) {
+    if (mead_graphics_api() == MEAD_GRAPHICS_VULKAN) {
+        typedef void *(*WindowHandle)(void *);
+        WindowHandle handle = loader ? (WindowHandle)loader->lookup_symbol(NULL, "mead_android_window_handle") : NULL;
+        void *window = handle ? handle(info->window) : NULL;
+        if (!window || !ensure_sdl() || !sdl_create_surface(window, instance, allocator, surface))
+            return VK_ERROR_INITIALIZATION_FAILED;
+        return VK_SUCCESS;
+    }
     mead_native_window native;
     if (!native_window(info->window, &native))
         return VK_ERROR_INITIALIZATION_FAILED;
