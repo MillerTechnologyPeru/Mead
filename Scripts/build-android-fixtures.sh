@@ -72,6 +72,13 @@ $common -shared -Wl,-soname,libfixture_android_lib.so -o $out/libfixture_android
 $common -shared -Wl,-soname,libfixture_glue.so -I$glue -o $out/libfixture_glue.so \
     Tests/Fixtures/fixture_glue.c $glue/android_native_app_glue.c -landroid -llog -ldl
 
+# Rendering, through the same glue: GLES by importing it, as most games do,
+# and Vulkan by dlopen, as Android's guidance has them do.
+$common -shared -Wl,-soname,libfixture_gles.so -I$glue -o $out/libfixture_gles.so \
+    Tests/Fixtures/fixture_gles.c $glue/android_native_app_glue.c -landroid -llog -lEGL -lGLESv3
+$common -shared -Wl,-soname,libfixture_vulkan.so -I$glue -o $out/libfixture_vulkan.so \
+    Tests/Fixtures/fixture_vulkan.c $glue/android_native_app_glue.c -landroid -llog -ldl
+
 # As NDK builds do: libunwind goes into each library, statically.
 cxx="$(echo "$common" | sed 's/^clang-19/clang++-19/') --unwindlib=libunwind"
 $cxx -nostdlib++ -shared -Wl,-soname,libfixture_cxx_thrower.so \
