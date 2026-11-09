@@ -154,3 +154,61 @@ private let account = GoogleAccount(email: "someone@example.com", masterToken: "
     #expect(manifest.packageName == "com.example.game")
     #expect(manifest.versionCode == 972_111_401)
 }
+
+// The cache: Google's last signed answer, kept until the validity time it
+// carries (VT=1800000000000 in the fixture), and checked again on every use.
+
+private func temporaryCache() -> LicenseCache {
+    LicenseCache(path: NSTemporaryDirectory() + "mead-license-\(UUID().uuidString)/license.json")
+}
+
+private func checkWithCache(_ google: FakeGoogle, _ cache: LicenseCache, now: Int64, package: String = "com.example.game", version: Int = 7) -> LicenseResult {
+    GooglePlayLicense(transport: google).check(account: account, packageName: package, versionCode: version, publicKey: publicKey,
+                                               cache: cache, nonce: 123, now: now)
+}
+
+@Test func aVerifiedAnswerIsKeptOnlyItsOwnerCanRead() throws {
+    let cache = temporaryCache()
+    #expect(checkWithCache(FakeGoogle(), cache, now: 1_700_000_000_000).verified)
+    let mode = try FileManager.default.attributesOfItem(atPath: cache.path)[.posixPermissions] as? NSNumber
+    #expect(mode?.intValue == 0o600)
+    #expect(cache.load()?.signedData == licensedData)
+}
+
+@Test func theKeptAnswerStandsInUntilGoogleSaysItExpires() {
+    let cache = temporaryCache()
+    #expect(checkWithCache(FakeGoogle(), cache, now: 1_700_000_000_000).verified)
+    let unreachable = FakeGoogle()
+    unreachable.authStatus = 403
+    let kept = checkWithCache(unreachable, cache, now: 1_750_000_000_000)
+    #expect(kept.verified)
+    #expect(kept.validationTime == 1_800_000_000_000)
+    #expect(kept.reason.contains("BadAuthentication"), "why Google wasn't asked is still said")
+    #expect(!checkWithCache(unreachable, cache, now: 1_800_000_000_001).verified, "not after its validity time")
+}
+
+@Test func aKeptAnswerIsCheckedAgainEveryTime() {
+    let unreachable = FakeGoogle()
+    unreachable.authStatus = 403
+    let tampered = temporaryCache()
+    tampered.save(LicenseAnswer(result: 0, signedData: licensedData.replacingOccurrences(of: "VT=1800000000000", with: "VT=1900000000000"),
+                                signature: licensedSignature))
+    #expect(!checkWithCache(unreachable, tampered, now: 1_850_000_000_000).verified, "an edited validity time")
+    let other = temporaryCache()
+    other.save(LicenseAnswer(result: 0, signedData: licensedData, signature: licensedSignature))
+    #expect(!checkWithCache(unreachable, other, now: 1_700_000_000_000, package: "com.other").verified, "another game")
+    #expect(!checkWithCache(unreachable, other, now: 1_700_000_000_000, version: 8).verified, "another version")
+    #expect(checkWithCache(unreachable, other, now: 1_700_000_000_000).verified, "and the right one passes")
+}
+
+@Test func googleSayingNoRemovesTheKeptAnswer() {
+    let cache = temporaryCache()
+    #expect(checkWithCache(FakeGoogle(), cache, now: 1_700_000_000_000).verified)
+    let no = FakeGoogle()
+    no.licenseBody = playResponse(result: 1, signedData: notLicensedData, signature: notLicensedSignature)
+    #expect(!checkWithCache(no, cache, now: 1_700_000_000_000).verified)
+    #expect(cache.load() == nil)
+    let unreachable = FakeGoogle()
+    unreachable.authStatus = 403
+    #expect(!checkWithCache(unreachable, cache, now: 1_700_000_000_000).verified, "nothing left to stand in")
+}
