@@ -196,13 +196,17 @@ static void render(struct android_app *app) {
     CHECK(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
     CHECK(capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT);
 
-    uint32_t format_count = 1;
-    VkSurfaceFormatKHR format;
-    VkResult formats = vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, &format_count, &format);
-    CHECK(formats == VK_SUCCESS || formats == VK_INCOMPLETE);
-    CHECK(format.format == VK_FORMAT_B8G8R8A8_UNORM || format.format == VK_FORMAT_B8G8R8A8_SRGB ||
-          format.format == VK_FORMAT_R8G8B8A8_UNORM || format.format == VK_FORMAT_R8G8B8A8_SRGB);
-    bool swapped = format.format == VK_FORMAT_B8G8R8A8_UNORM || format.format == VK_FORMAT_B8G8R8A8_SRGB;
+    // What comes first varies by driver; an app takes one it can use.
+    uint32_t format_count = 0;
+    VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, &format_count, NULL));
+    VkSurfaceFormatKHR *formats = calloc(format_count, sizeof(*formats));
+    VK(vkGetPhysicalDeviceSurfaceFormatsKHR(physical, surface, &format_count, formats));
+    VkSurfaceFormatKHR format = { VK_FORMAT_UNDEFINED, 0 };
+    for (uint32_t which = 0; which < format_count && format.format == VK_FORMAT_UNDEFINED; which++)
+        if (formats[which].format == VK_FORMAT_B8G8R8A8_UNORM || formats[which].format == VK_FORMAT_R8G8B8A8_UNORM)
+            format = formats[which];
+    CHECK(format.format != VK_FORMAT_UNDEFINED);
+    bool swapped = format.format == VK_FORMAT_B8G8R8A8_UNORM;
 
     VkCompositeAlphaFlagBitsKHR alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     if (!(capabilities.supportedCompositeAlpha & alpha))
