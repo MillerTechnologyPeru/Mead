@@ -159,8 +159,9 @@ final class GameActivityRunner {
         // loop starts, for trying a game's screens on a machine nobody is at.
         // Each tap moves the pointer there first and is held down for 150 ms,
         // as a click is: a UI takes the press on what the pointer is over.
-        // "seconds:key=scancode" presses a key for 150 ms instead, and
-        // "seconds:wheel=notches" turns the mouse wheel.
+        // "seconds:key=scancode" presses a key for 150 ms instead,
+        // "seconds:wheel=notches" turns the mouse wheel, and
+        // "seconds:look=dx,dy" moves the mouse by that much.
         var taps: [(at: Double, x: Float, y: Float, kind: Int)] = (getenv("MEAD_DEBUG_TAPS").map { String(cString: $0) } ?? "")
             .split(separator: ";").flatMap { item -> [(at: Double, x: Float, y: Float, kind: Int)] in
                 let halves = item.split(separator: ":", maxSplits: 1)
@@ -170,6 +171,10 @@ final class GameActivityRunner {
                 }
                 if halves[1].hasPrefix("wheel="), let notches = Float(halves[1].dropFirst(6)) {
                     return [(at, notches, 0, 5)]
+                }
+                if halves[1].hasPrefix("look=") {
+                    let delta = halves[1].dropFirst(5).split(separator: ",").compactMap { Float($0) }
+                    return delta.count == 2 ? [(at, delta[0], delta[1], 6)] : []
                 }
                 let parts = halves[1].split(separator: ",").compactMap { Float($0) }
                 guard parts.count == 2 else { return [] }
@@ -184,12 +189,20 @@ final class GameActivityRunner {
         while running {
             while looper.pollOnce(timeout: 0, outFd: nil, outEvents: nil, outData: nil) == ALOOPER_POLL_CALLBACK {}
             activity.runUiCallbacks()
+            // Pointer capture, asked for on the game's thread, applied on SDL's.
+            let wantsCapture = JavaMinecraftActivity.cursorLocked
+            if wantsCapture != input.pointerCaptured {
+                input.pointerCaptured = wantsCapture
+                JavaRuntime.shared.trace("pointer \(wantsCapture ? "captured" : "released")")
+                if getenv("MEAD_DEBUG_TAPS") != nil { writeError("pointer \(wantsCapture ? "captured" : "released")") }
+                _ = SDL.setWindowRelativeMouseMode(sdlWindow, wantsCapture)
+            }
             if let tap = taps.first {
                 var now = timespec()
                 clock_gettime(CLOCK_MONOTONIC, &now)
                 if Double(now.tv_sec - started.tv_sec) + Double(now.tv_nsec - started.tv_nsec) / 1e9 >= tap.at {
                     taps.removeFirst()
-                    writeError("debug \(["move", "down", "up", "key down", "key up", "wheel"][tap.kind]) at \(tap.x),\(tap.y)")
+                    writeError("debug \(["move", "down", "up", "key down", "key up", "wheel", "look"][tap.kind]) at \(tap.x),\(tap.y)")
                     do {
                         var click = mead_sdl_event()
                         switch tap.kind {
@@ -208,6 +221,12 @@ final class GameActivityRunner {
                             click.key.type = UInt32(tap.kind == 3 ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
                             click.key.scancode = UInt32(tap.x)
                             click.key.down = tap.kind == 3
+                        case 6:
+                            click.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION)
+                            click.motion.x = Float(window.pixelWidth) / 2
+                            click.motion.y = Float(window.pixelHeight) / 2
+                            click.motion.xrel = tap.x
+                            click.motion.yrel = tap.y
                         default:
                             click.wheel.type = UInt32(MEAD_SDL_EVENT_MOUSE_WHEEL)
                             click.wheel.y = tap.x
