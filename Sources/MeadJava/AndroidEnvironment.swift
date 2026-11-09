@@ -28,6 +28,12 @@ public enum AndroidEnvironment {
         return "\(home)/.mead/games/\(packageName)"
     }
 
+    /// Where the game keeps what a player would copy around.
+    public static var externalDirectory: String {
+        makeDirectories(dataDirectory)
+        return dataDirectory
+    }
+
     public static var filesDirectory: String {
         let path = "\(dataDirectory)/files"
         makeDirectories(path)
@@ -79,10 +85,14 @@ public enum JavaFramework {
             JavaSystem.self, JavaLangThread.self, JavaArrayList.self, JavaHashMap.self, JavaUUID.self, JavaLocale.self,
             JavaFile.self, JavaAssetManager.self, JavaContext.self, JavaContextWrapper.self, JavaActivity.self,
             JavaNativeActivity.self, JavaBuild.self, JavaBuildVersion.self, JavaSurface.self, JavaFMOD.self, JavaPairipVMRunner.self,
+            JavaClassLoader.self, JavaConfiguration.self, JavaInsets.self, JavaDisplay.self, JavaWindowManager.self,
+            JavaGameActivity.self, JavaMinecraftActivity.self, JavaCrashManager.self, JavaAppExitInfoHelper.self,
+            JavaHardwareInformation.self, JavaBatteryMonitor.self, JavaThermalMonitor.self, JavaDateTimeHelper.self,
         ]
         for type in classes {
             runtime.defineClass(for: type)
         }
+        runtime.classLoaderFactory = { JavaClassLoader() }
         JavaBuild.refresh()
         JavaBuildVersion.refresh()
     }
