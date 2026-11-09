@@ -254,6 +254,23 @@ public final class JavaRuntime {
         findClass(named: "[L\(elementClass);").map { JavaObjectArray(count: count, initial: nil, type: $0) }
     }
 
+    /// A byte[] holding `bytes`.
+    public func newByteArray(_ bytes: [UInt8]) -> JavaObject? {
+        guard let type = findClass(named: "[B") else { return nil }
+        let array = JavaPrimitiveArray(kind: UInt8(ascii: "B"), count: bytes.count, type: type)
+        bytes.withUnsafeBytes { source in
+            if let base = source.baseAddress { array.storage.copyMemory(from: base, byteCount: source.count) }
+        }
+        return array
+    }
+
+    /// A String[] holding `strings`.
+    public func newStringArray(_ strings: [String]) -> JavaObject? {
+        guard let array = newObjectArray(elementClass: "java/lang/String", count: strings.count) as? JavaObjectArray else { return nil }
+        array.elements = strings.map { JavaString($0) }
+        return array
+    }
+
     func allClasses() -> [JavaClass] {
         lock.withLock { Array(classesByName.values) }
     }
