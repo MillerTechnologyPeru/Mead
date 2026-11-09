@@ -14,6 +14,10 @@ public final class JavaString: JavaObject {
         self.init(units: Array(text.utf16))
     }
 
+    @JavaMethod public convenience override init() {
+        self.init(units: [])
+    }
+
     public var swiftValue: String {
         String(decoding: units, as: UTF16.self)
     }
@@ -26,6 +30,23 @@ public final class JavaString: JavaObject {
     @JavaMethod("toString")
     public func javaToString() -> JavaString? {
         self
+    }
+
+    /// Strings are equal by their text, not by being the same object:
+    /// native code compares a returned string with a constant this way.
+    @JavaMethod("equals", signature: "(Ljava/lang/Object;)Z")
+    public func javaEquals(_ other: JavaObject?) -> Bool {
+        (other as? JavaString)?.units == units
+    }
+
+    @JavaMethod("hashCode")
+    public func javaHashCode() -> Int32 {
+        units.reduce(Int32(0)) { $0 &* 31 &+ Int32($1) }
+    }
+
+    @JavaMethod("isEmpty")
+    public func javaIsEmpty() -> Bool {
+        units.isEmpty
     }
 }
 
