@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 // bionic's sigset_t is one 64-bit word, the kernel's own; glibc's is 128
@@ -33,6 +34,11 @@ typedef struct android_sigaction {
 _Static_assert(sizeof(android_sigaction) == 32, "bionic's struct sigaction is 32 bytes");
 
 int bionic_sigaction(int number, const android_sigaction *action, android_sigaction *old) {
+    // Under MEAD_CRASH_REPORT a crash is Mead's to report: an app's crash
+    // handler would hide where it happened.
+    if (action && getenv("MEAD_CRASH_REPORT") &&
+        (number == SIGSEGV || number == SIGBUS || number == SIGILL || number == SIGABRT || number == SIGFPE))
+        return 0;
     struct sigaction host_action, host_old;
     memset(&host_action, 0, sizeof(host_action));
     memset(&host_old, 0, sizeof(host_old));
