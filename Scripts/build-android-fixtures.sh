@@ -79,6 +79,10 @@ $common -shared -Wl,-soname,libfixture_gles.so -I$glue -o $out/libfixture_gles.s
 $common -shared -Wl,-soname,libfixture_vulkan.so -I$glue -o $out/libfixture_vulkan.so \
     Tests/Fixtures/fixture_vulkan.c $glue/android_native_app_glue.c -landroid -llog -ldl
 
+# Audio through both of Android's APIs.
+$common -shared -Wl,-soname,libfixture_audio.so -o $out/libfixture_audio.so \
+    Tests/Fixtures/fixture_audio.c -lOpenSLES -laaudio
+
 # As NDK builds do: libunwind goes into each library, statically.
 cxx="$(echo "$common" | sed 's/^clang-19/clang++-19/') --unwindlib=libunwind"
 $cxx -nostdlib++ -shared -Wl,-soname,libfixture_cxx_thrower.so \
