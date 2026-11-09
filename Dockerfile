@@ -35,3 +35,12 @@ ENV MEAD_NDK=/opt/mead-ndk
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libsdl3-0 libsdl3-dev \
  && rm -rf /var/lib/apt/lists/*
+
+# Software GL and Vulkan under a virtual X server, so that rendering can be
+# tested for real: the host's libEGL, GLES and Vulkan loaders, and Mesa's
+# llvmpipe and lavapipe drivers behind them.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+        libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libwayland-egl1 \
+        libvulkan1 mesa-vulkan-drivers xvfb xauth \
+ && rm -rf /var/lib/apt/lists/*
