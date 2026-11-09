@@ -31,6 +31,15 @@ final class GameActivityInput {
     var pointerCaptured = false
     private var mouseButtons: Int32 = 0
     private var mouseDownTime: Int64 = 0
+    /// Set for a game made for touch, with no mouse of its own: the left
+    /// button is a finger, and moving with it held drags that finger.
+    var mouseIsFinger = false
+    private var mouseFingerDown = false
+    /// The finger the mouse plays, apart from any real finger's ID.
+    private static let mouseFinger = UInt64.max
+    /// SDL_TOUCH_MOUSEID: a mouse event SDL made up from a real touch, which
+    /// has arrived already as a finger event of its own.
+    private static let touchMouse = UInt32.max
 
     init(sendMotion: @escaping (JavaMotionEvent) -> Void, sendKey: @escaping (JavaKeyEvent) -> Void,
          editText: @escaping (TextEdit) -> Void = { _ in }, clock: @escaping () -> Int64 = GameActivityInput.uptimeMillis) {
@@ -53,6 +62,7 @@ final class GameActivityInput {
     func handle(_ event: mead_sdl_event, windowWidth: Float, windowHeight: Float, pixelsPerPoint scale: Float = 1) {
         // Handled as they arrive, so the time they arrive is the time they happened.
         let time = clock()
+        if mouseIsFinger, mouseAsFinger(event, pixelsPerPoint: scale, time: time) { return }
         switch Int(event.type) {
         case MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN, MEAD_SDL_EVENT_MOUSE_BUTTON_UP:
             let button = event.button
@@ -118,6 +128,26 @@ final class GameActivityInput {
                                  unicodeChar: Self.character(key.key, mod: key.mod), eventTime: time, downTime: downTime))
         default:
             break
+        }
+    }
+
+    /// Handles `event` if it's the mouse's, as a finger: true if it was.
+    private func mouseAsFinger(_ event: mead_sdl_event, pixelsPerPoint scale: Float, time: Int64) -> Bool {
+        switch Int(event.type) {
+        case MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN, MEAD_SDL_EVENT_MOUSE_BUTTON_UP:
+            let button = event.button
+            guard button.which != Self.touchMouse, Int(button.button) == MEAD_SDL_BUTTON_LEFT else { return true }
+            mouseFingerDown = button.down
+            touch(key: Self.mouseFinger, down: button.down, up: !button.down, x: button.x * scale, y: button.y * scale, time: time)
+            return true
+        case MEAD_SDL_EVENT_MOUSE_MOTION:
+            let motion = event.motion
+            if motion.which != Self.touchMouse, mouseFingerDown {
+                touch(key: Self.mouseFinger, down: false, up: false, x: motion.x * scale, y: motion.y * scale, time: time)
+            }
+            return true
+        default:
+            return false
         }
     }
 
