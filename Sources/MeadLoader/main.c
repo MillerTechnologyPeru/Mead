@@ -34,6 +34,7 @@ static void usage(FILE *out) {
           "                      once and returns 0 instead of aborting\n"
           "  MEAD_GRAPHICS_API   auto (the default) offers both; gles or vulkan\n"
           "                      hides the other from the game\n"
+          "  MEAD_CRASH_REPORT   1: print registers and frames on a crash\n"
           "  MEAD_DATA_DIR       where the game's files are, when the argument\n"
           "                      is a library rather than a directory\n"
           "\n"
@@ -105,6 +106,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (getenv("MEAD_CRASH_REPORT"))
+        mead_install_crash_report();
+
     char *target = argv[first];
     struct stat status;
     if (stat(target, &status) == 0 && S_ISDIR(status.st_mode)) {
@@ -152,6 +156,18 @@ int main(int argc, char **argv) {
             return 1;
         }
         return run(on_create, target);
+    }
+
+    // Or a GameActivity's, whose entry is the native half of its Java class.
+    void *initialize = mead_find_symbol(image, "Java_com_google_androidgamesdk_GameActivity_initializeNativeCode");
+    if (initialize) {
+        int (*run)(void *, void *, const char *) =
+            (int (*)(void *, void *, const char *))mead_find_symbol(NULL, "mead_android_run_game_activity");
+        if (!run) {
+            fprintf(stderr, "mead: no provider can run a GameActivity\n");
+            return 1;
+        }
+        return run(initialize, mead_find_symbol(image, "GameActivity_register"), target);
     }
     return 0;
 }
