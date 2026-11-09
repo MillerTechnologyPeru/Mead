@@ -37,7 +37,8 @@ static const struct {
     { "libvulkan.so",     "libMeadVulkan.so" },
     { "libOpenSLES.so",   "libMeadOpenSLES.so" },
     { "libaaudio.so",     "libMeadOpenSLES.so" },
-    { "libart.so",        "libMeadJNI.so" },
+    { "libart.so",        "libMeadAndroid.so" },
+    { "libnativehelper.so", "libMeadAndroid.so" },
 };
 #define PROVIDER_COUNT (sizeof(providers) / sizeof(providers[0]))
 
