@@ -1,8 +1,10 @@
 import Glibc
 import MeadJNI
+import MeadJava
 
 // Minecraft's Java side, as far as a trace of the game has shown it matters:
-// the compat profile for one game, kept apart from Android's own classes.
+// the compat profile for one game, kept apart from Android's own classes,
+// which are MeadJava's.
 //
 // Nothing here answers for a license or an integrity check. Those calls are
 // left to fall through to the stand-ins' zeros and falses.
@@ -38,62 +40,6 @@ private func ipv4Interfaces() -> (addresses: [String], broadcasts: [String]) {
         }
     }
     return (addresses, broadcasts)
-}
-
-@JavaClass("java/lang/ClassLoader")
-public final class JavaClassLoader: JavaObject {
-    @JavaMethod("findClass", signature: "(Ljava/lang/String;)Ljava/lang/Class;")
-    public func findClass(_ name: String?) -> JavaObject? {
-        name.flatMap { JavaRuntime.shared.findClassPublic(named: $0) }
-    }
-
-    @JavaMethod("loadClass", signature: "(Ljava/lang/String;)Ljava/lang/Class;")
-    public func loadClass(_ name: String?) -> JavaObject? {
-        findClass(name)
-    }
-}
-
-@JavaClass("android/content/res/Configuration")
-public final class JavaConfiguration: JavaObject {
-    @JavaField("colorMode") public var colorMode: Int32 = 0
-    @JavaField("densityDpi") public var densityDpi: Int32 = 160
-    @JavaField("fontScale") public var fontScale: Float = 1
-    @JavaField("fontWeightAdjustment") public var fontWeightAdjustment: Int32 = 0
-    @JavaField("hardKeyboardHidden") public var hardKeyboardHidden: Int32 = 1
-    @JavaField("keyboard") public var keyboard: Int32 = 2
-    @JavaField("keyboardHidden") public var keyboardHidden: Int32 = 1
-    @JavaField("mcc") public var mcc: Int32 = 0
-    @JavaField("mnc") public var mnc: Int32 = 0
-    @JavaField("navigation") public var navigation: Int32 = 1
-    @JavaField("navigationHidden") public var navigationHidden: Int32 = 1
-    @JavaField("orientation") public var orientation: Int32 = 2
-    @JavaField("screenHeightDp") public var screenHeightDp: Int32 = 720
-    @JavaField("screenLayout") public var screenLayout: Int32 = 3
-    @JavaField("screenWidthDp") public var screenWidthDp: Int32 = 1280
-    @JavaField("smallestScreenWidthDp") public var smallestScreenWidthDp: Int32 = 720
-    @JavaField("touchscreen") public var touchscreen: Int32 = 3
-    @JavaField("uiMode") public var uiMode: Int32 = 17
-}
-
-@JavaClass("androidx/core/graphics/Insets")
-public final class JavaInsets: JavaObject {
-    @JavaField("left") public var left: Int32 = 0
-    @JavaField("right") public var right: Int32 = 0
-    @JavaField("top") public var top: Int32 = 0
-    @JavaField("bottom") public var bottom: Int32 = 0
-}
-
-@JavaClass("android/view/Display")
-public final class JavaDisplay: JavaObject {
-    @JavaMethod("getRefreshRate") public func getRefreshRate() -> Float { 60 }
-    @JavaMethod("getAppVsyncOffsetNanos") public func getAppVsyncOffsetNanos() -> Int64 { 0 }
-    @JavaMethod("getPresentationDeadlineNanos") public func getPresentationDeadlineNanos() -> Int64 { 11_000_000 }
-}
-
-@JavaClass("android/view/WindowManager")
-public final class JavaWindowManager: JavaObject {
-    private let display = JavaDisplay()
-    @JavaMethod("getDefaultDisplay") public func getDefaultDisplay() -> JavaDisplay? { display }
 }
 
 @JavaClass("com/mojang/minecraftpe/NetworkMonitor")
@@ -263,6 +209,61 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     @JavaMethod("getCaretPosition") public func getCaretPosition() -> Int32 { Int32(Self.textBox.current.start) }
     @JavaMethod("setCaretPosition") public func setCaretPosition(_ position: Int32) { Self.textBox.setCaret(Int(position)) }
 
+    /// An image file's pixels, as Minecraft's Java gives them: width, height,
+    /// then each pixel as ARGB. Decoded by the game's own stb_image, as
+    /// mcpelauncher does; nil for a file that can't be read or decoded.
+    @JavaMethod("getImageData", signature: "(Ljava/lang/String;)[I")
+    public func getImageData(_ path: String?) -> JavaObject? {
+        guard let path else { return nil }
+        JavaRuntime.shared.trace("getImageData \(path)")
+        guard let data = Self.contents(of: path), !data.isEmpty, let decoder = Self.imageDecoder else { return nil }
+        var width: Int32 = 0, height: Int32 = 0, channels: Int32 = 0
+        let pixels = data.withUnsafeBufferPointer { bytes in
+            decoder.load(bytes.baseAddress!, Int32(bytes.count), &width, &height, &channels, 4)
+        }
+        guard let pixels else { return nil }
+        defer { decoder.free(pixels) }
+        let count = Int(width) * Int(height)
+        var values = [Int32](repeating: 0, count: 2 + count)
+        values[0] = width
+        values[1] = height
+        for index in 0..<count {
+            let r = UInt32(pixels[index * 4]), g = UInt32(pixels[index * 4 + 1])
+            let b = UInt32(pixels[index * 4 + 2]), a = UInt32(pixels[index * 4 + 3])
+            values[2 + index] = Int32(bitPattern: a << 24 | r << 16 | g << 8 | b)
+        }
+        return JavaRuntime.shared.newIntArray(values)
+    }
+
+    private static func contents(of path: String) -> [UInt8]? {
+        let descriptor = open(path, O_RDONLY | O_CLOEXEC)
+        guard descriptor >= 0 else { return nil }
+        defer { close(descriptor) }
+        var bytes: [UInt8] = []
+        var chunk = [UInt8](repeating: 0, count: 65536)
+        while true {
+            let count = chunk.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+            if count < 0 { return nil }
+            if count == 0 { return bytes }
+            bytes += chunk[0..<count]
+        }
+    }
+
+    private typealias ImageLoad = @convention(c) (UnsafePointer<UInt8>, Int32, UnsafeMutablePointer<Int32>, UnsafeMutablePointer<Int32>,
+                                                  UnsafeMutablePointer<Int32>, Int32) -> UnsafeMutablePointer<UInt8>?
+    private typealias ImageFree = @convention(c) (UnsafeMutableRawPointer?) -> Void
+    private typealias LoaderSymbol = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>, UnsafeRawPointer?) -> UnsafeMutableRawPointer?
+
+    /// The game's stb_image, found through Mead's loader, which the mead
+    /// executable exports.
+    private static let imageDecoder: (load: ImageLoad, free: ImageFree)? = {
+        guard let lookup = dlsym(UnsafeMutableRawPointer(bitPattern: 0), "mead_dlsym") else { return nil }
+        let find = unsafeBitCast(lookup, to: LoaderSymbol.self)
+        guard let load = find(nil, "_ZN6renoir10ThirdParty21stbi_load_from_memoryEPKhiPiS3_S3_i", nil),
+              let free = find(nil, "_ZN6renoir10ThirdParty15stbi_image_freeEPv", nil) else { return nil }
+        return (unsafeBitCast(load, to: ImageLoad.self), unsafeBitCast(free, to: ImageFree.self))
+    }()
+
     @JavaMethod("getInternalStoragePath") public func getInternalStoragePath() -> String? { AndroidEnvironment.filesDirectory }
     @JavaMethod("getExternalStoragePath") public func getExternalStoragePath() -> String? { AndroidEnvironment.externalDirectory }
     // There was never an older install: empty is how to say so. Given a path,
@@ -307,22 +308,4 @@ public final class JavaMinecraftActivity: JavaGameActivity {
     @JavaMethod("getBroadcastAddresses", signature: "()[Ljava/lang/String;") public func getBroadcastAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().broadcasts) }
     @JavaMethod("getIPAddresses", signature: "()[Ljava/lang/String;") public func getIPAddresses() -> JavaObject? { JavaRuntime.shared.newStringArray(ipv4Interfaces().addresses) }
     @JavaMethod("calculateAvailableDiskFreeSpace") public func calculateAvailableDiskFreeSpace(_ path: String?) -> Int64 { 1 << 34 }
-}
-
-/// A value several threads read and write.
-final class LockedValue<Value> {
-    private var value: Value
-    private let mutex: UnsafeMutablePointer<pthread_mutex_t> = {
-        let mutex = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
-        pthread_mutex_init(mutex, nil)
-        return mutex
-    }()
-
-    init(_ value: Value) { self.value = value }
-
-    func withLock<Result>(_ body: (inout Value) -> Result) -> Result {
-        pthread_mutex_lock(mutex)
-        defer { pthread_mutex_unlock(mutex) }
-        return body(&value)
-    }
 }
