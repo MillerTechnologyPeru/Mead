@@ -40,6 +40,9 @@ long bionic_ftell(FILE *file) { return ftell(bionic_file(file)); }
 off_t bionic_ftello(FILE *file) { return ftello(bionic_file(file)); }
 int bionic_fseek(FILE *file, long offset, int whence) { return fseek(bionic_file(file), offset, whence); }
 int bionic_fseeko(FILE *file, off_t offset, int whence) { return fseeko(bionic_file(file), offset, whence); }
+// On 64-bit Android, off_t is 64 bits and the *64 names are the same calls.
+off_t bionic_ftello64(FILE *file) { return ftello(bionic_file(file)); }
+int bionic_fseeko64(FILE *file, off_t offset, int whence) { return fseeko(bionic_file(file), offset, whence); }
 int bionic_setvbuf(FILE *file, char *buffer, int mode, size_t size) {
     return setvbuf(bionic_file(file), buffer, mode, size);
 }

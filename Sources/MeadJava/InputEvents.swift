@@ -93,6 +93,27 @@ public final class JavaMotionEvent: JavaObject {
     @JavaMethod("getYPrecision") public func getYPrecision() -> Float { 1 }
     @JavaMethod("getPointerId") public func getPointerId(_ index: Int32) -> Int32 { pointer(index)?.id ?? -1 }
     @JavaMethod("getToolType") public func getToolType(_ index: Int32) -> Int32 { pointer(index)?.toolType ?? 0 }
+    /// A copy, which Unity takes to read an event on its own thread. These
+    /// never change after they're made, so the event is its own copy.
+    @JavaMethod("obtain", signature: "(Landroid/view/MotionEvent;)Landroid/view/MotionEvent;")
+    public static func obtain(_ event: JavaObject?) -> JavaMotionEvent? { event as? JavaMotionEvent }
+
+    @JavaMethod("recycle") public func recycle() {}
+
+    @JavaMethod("getActionMasked") public func getActionMasked() -> Int32 { action & 0xff }
+    @JavaMethod("getActionIndex") public func getActionIndex() -> Int32 { (action >> 8) & 0xff }
+    @JavaMethod("getX", signature: "()F") public func getX() -> Float { getX(0) }
+    @JavaMethod("getX", signature: "(I)F") public func getX(_ index: Int32) -> Float { pointer(index)?.x ?? 0 }
+    @JavaMethod("getY", signature: "()F") public func getY() -> Float { getY(0) }
+    @JavaMethod("getY", signature: "(I)F") public func getY(_ index: Int32) -> Float { pointer(index)?.y ?? 0 }
+    @JavaMethod("getPressure", signature: "()F") public func getPressure() -> Float { getPressure(0) }
+    @JavaMethod("getPressure", signature: "(I)F") public func getPressure(_ index: Int32) -> Float { getAxisValue(Self.axisPressure, index) }
+    @JavaMethod("getSize", signature: "(I)F") public func getSize(_ index: Int32) -> Float { 0 }
+    @JavaMethod("getTouchMajor", signature: "()F") public func getTouchMajor() -> Float { 0 }
+    @JavaMethod("getTouchMinor", signature: "()F") public func getTouchMinor() -> Float { 0 }
+    @JavaMethod("getTouchMajor", signature: "(I)F") public func getTouchMajor(_ index: Int32) -> Float { 0 }
+    @JavaMethod("getTouchMinor", signature: "(I)F") public func getTouchMinor(_ index: Int32) -> Float { 0 }
+    @JavaMethod("getOrientation", signature: "(I)F") public func getOrientation(_ index: Int32) -> Float { 0 }
     @JavaMethod("getRawX") public func getRawX(_ index: Int32) -> Float { pointer(index)?.x ?? 0 }
     @JavaMethod("getRawY") public func getRawY(_ index: Int32) -> Float { pointer(index)?.y ?? 0 }
 
@@ -119,6 +140,11 @@ public final class JavaKeyEvent: JavaObject {
     public static let actionDown: Int32 = 0
     public static let actionUp: Int32 = 1
     public static let sourceKeyboard: Int32 = 0x101
+    @JavaField("KEYCODE_VOLUME_UP") public static var keycodeVolumeUp: Int32 = 24
+    @JavaField("KEYCODE_VOLUME_DOWN") public static var keycodeVolumeDown: Int32 = 25
+    @JavaField("KEYCODE_CAMERA") public static var keycodeCamera: Int32 = 27
+    @JavaField("KEYCODE_ZOOM_IN") public static var keycodeZoomIn: Int32 = 168
+    @JavaField("KEYCODE_ZOOM_OUT") public static var keycodeZoomOut: Int32 = 169
     public static let metaShiftOn: Int32 = 0x1
     public static let metaAltOn: Int32 = 0x2
     public static let metaCtrlOn: Int32 = 0x1000
@@ -156,6 +182,8 @@ public final class JavaKeyEvent: JavaObject {
 
     @JavaMethod("getAction") public func getAction() -> Int32 { action }
     @JavaMethod("getKeyCode") public func getKeyCode() -> Int32 { keyCode }
+    @JavaMethod("isShiftPressed") public func isShiftPressed() -> Bool { metaState & Self.metaShiftOn != 0 }
+    @JavaMethod("getCharacters") public func getCharacters() -> String? { nil }
     @JavaMethod("getScanCode") public func getScanCode() -> Int32 { scanCode }
     @JavaMethod("getMetaState") public func getMetaState() -> Int32 { metaState }
     @JavaMethod("getModifiers") public func getModifiers() -> Int32 { metaState & Self.modifierMask }

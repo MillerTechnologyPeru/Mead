@@ -44,9 +44,35 @@ static void usage(FILE *out) {
           out);
 }
 
+// A Unity game's libraries: libmain.so starts it, through Unity's Java, and
+// loads libunity.so and the game's code after it. NULL for any other game.
+static char *unity_library_directory(const char *directory) {
+    char *libraries = NULL, *probe = NULL;
+    if (asprintf(&libraries, "%s/lib/arm64-v8a", directory) < 0)
+        return NULL;
+    struct stat status;
+    int found = asprintf(&probe, "%s/libunity.so", libraries) >= 0 && stat(probe, &status) == 0;
+    free(probe);
+    probe = NULL;
+    found = found && asprintf(&probe, "%s/libmain.so", libraries) >= 0 && stat(probe, &status) == 0;
+    free(probe);
+    if (found)
+        return libraries;
+    free(libraries);
+    return NULL;
+}
+
 // The game's library in a directory extracted from an APK: the largest .so
 // in lib/arm64-v8a, which for every game checked so far is the game's own.
+// Unity's games are the exception, and start from libmain.so.
 static char *library_in(const char *directory) {
+    char *unity = unity_library_directory(directory);
+    if (unity) {
+        char *main_library = NULL;
+        int made = asprintf(&main_library, "%s/libmain.so", unity);
+        free(unity);
+        return made >= 0 ? main_library : NULL;
+    }
     char libraries[4096];
     snprintf(libraries, sizeof(libraries), "%s/lib/arm64-v8a", directory);
     DIR *open = opendir(libraries);
@@ -110,8 +136,10 @@ int main(int argc, char **argv) {
         mead_install_crash_report();
 
     char *target = argv[first];
+    char *unity = NULL;
     struct stat status;
     if (stat(target, &status) == 0 && S_ISDIR(status.st_mode)) {
+        unity = unity_library_directory(target);
         char *inside = library_in(target);
         if (!inside) {
             fprintf(stderr, "mead: no lib/arm64-v8a/*.so in %s\n", target);
@@ -144,6 +172,16 @@ int main(int argc, char **argv) {
         printf("%s: %s (%d)\n", target, result == 0 ? "passed" : "FAILED", result);
         fflush(stdout);
         return result == 0 ? 0 : 1;
+    }
+
+    // A Unity game: its runner plays Unity's Java, which loads the rest.
+    if (unity) {
+        int (*run)(const char *) = (int (*)(const char *))mead_find_symbol(NULL, "mead_android_run_unity");
+        if (!run) {
+            fprintf(stderr, "mead: no provider can run a Unity game\n");
+            return 1;
+        }
+        return run(unity);
     }
 
     // A NativeActivity's entry point: run it as Android would.

@@ -7,9 +7,41 @@ public enum AndroidEnvironment {
     /// The loader's services, once the provider has started.
     public nonisolated(unsafe) static var loader: UnsafePointer<mead_startup_info>?
 
-    /// The directory the game was extracted to, when it was run from one.
+    /// The directory the game was extracted to, when it was run from one:
+    /// absolute, as Android's paths always are. Unity takes a path without
+    /// a leading slash as one inside its own data, not a file.
     public static var gameDirectory: String? {
-        getenv("MEAD_DATA_DIR").map { String(cString: $0) }
+        guard let directory = getenv("MEAD_DATA_DIR") else { return nil }
+        guard let resolved = realpath(directory, nil) else { return String(cString: directory) }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// The APK the game came in, kept beside what was extracted from it as
+    /// base.apk: some engines (Unity's) read their data straight out of it.
+    /// Without one, the game's directory stands in.
+    public static var packageCodePath: String? {
+        guard let directory = gameDirectory else { return nil }
+        let apk = "\(directory)/base.apk"
+        return access(apk, R_OK) == 0 ? apk : directory
+    }
+
+    /// The split APKs beside it, split_*.apk, in name order, as
+    /// ApplicationInfo.splitSourceDirs lists them.
+    public static var splitCodePaths: [String] {
+        guard let directory = gameDirectory, let listing = opendir(directory) else { return [] }
+        defer { closedir(listing) }
+        var paths: [String] = []
+        while let entry = readdir(listing) {
+            let name = withUnsafeBytes(of: entry.pointee.d_name) { String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self) }
+            if name.hasPrefix("split_"), name.hasSuffix(".apk") { paths.append("\(directory)/\(name)") }
+        }
+        return paths.sorted()
+    }
+
+    /// Where the game's native libraries are.
+    public static var nativeLibraryDirectory: String? {
+        gameDirectory.map { "\($0)/lib/arm64-v8a" }
     }
 
     /// The app's package. The manifest will say, once something reads it.
@@ -80,11 +112,22 @@ public enum JavaFramework {
         runtime.defineInterface("java/util/List", extending: ["java/util/Collection"], methods: [
             ("get", "(I)Ljava/lang/Object;"), ("set", "(ILjava/lang/Object;)Ljava/lang/Object;"), ("remove", "(I)Ljava/lang/Object;"),
         ])
+        runtime.defineInterface("java/util/Set", extending: ["java/util/Collection"], methods: [
+            ("iterator", "()Ljava/util/Iterator;"),
+        ])
+        runtime.defineInterface("java/util/Iterator", methods: [("hasNext", "()Z"), ("next", "()Ljava/lang/Object;")])
+        runtime.defineInterface("java/util/Map$Entry", methods: [
+            ("getKey", "()Ljava/lang/Object;"), ("getValue", "()Ljava/lang/Object;"),
+        ])
         runtime.defineInterface("java/util/Map", methods: [
             ("size", "()I"), ("isEmpty", "()Z"), ("clear", "()V"), ("get", "(Ljava/lang/Object;)Ljava/lang/Object;"),
             ("put", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"),
             ("remove", "(Ljava/lang/Object;)Ljava/lang/Object;"), ("containsKey", "(Ljava/lang/Object;)Z"),
+            ("entrySet", "()Ljava/util/Set;"), ("keySet", "()Ljava/util/Set;"), ("values", "()Ljava/util/Collection;"),
         ])
+
+        runtime.defineInterface("android/os/Handler$Callback", methods: [("handleMessage", "(Landroid/os/Message;)Z")])
+        runtime.defineInterface("android/view/Choreographer$FrameCallback", methods: [("doFrame", "(J)V")])
 
         runtime.defineInterface("java/security/Key")
         runtime.defineInterface("java/security/PublicKey", extending: ["java/security/Key"])
@@ -95,10 +138,19 @@ public enum JavaFramework {
             JavaSystem.self, JavaLangThread.self, JavaArrayList.self, JavaHashMap.self, JavaUUID.self, JavaLocale.self,
             JavaFile.self, JavaAssetManager.self, JavaContext.self, JavaContextWrapper.self, JavaActivity.self,
             JavaNativeActivity.self, JavaBuild.self, JavaBuildVersion.self, JavaSurface.self, JavaFMOD.self, JavaPairipVMRunner.self,
-            JavaClassLoader.self, JavaConfiguration.self, JavaInsets.self, JavaDisplay.self, JavaWindowManager.self,
+            JavaClassLoader.self, JavaAlertDialogBuilder.self, JavaAlertDialog.self, JavaConfiguration.self, JavaInsets.self, JavaDisplay.self, JavaWindowManager.self,
             JavaGameActivity.self, JavaTextInputConnection.self, JavaTextInputState.self, JavaBase64.self, JavaArrays.self,
             JavaX509EncodedKeySpec.self, JavaRSAPublicKey.self, JavaKeyFactory.self, JavaSignature.self,
             JavaHttpClientRequest.self, JavaMotionEvent.self, JavaKeyEvent.self,
+            JavaStringBuilder.self, JavaInputStream.self, JavaAssetInputStream.self, JavaScanner.self, JavaIntent.self,
+            JavaProcess.self,
+            JavaApplicationInfo.self, JavaEnvironment.self,
+            JavaLooper.self, JavaMessage.self, JavaHandler.self, JavaHandlerThread.self, JavaChoreographer.self,
+            JavaCollection.self, JavaIterator.self, JavaMapEntry.self,
+            JavaRect.self, JavaWindowMetrics.self, JavaDisplayMetrics.self, JavaLocaleList.self, JavaResources.self,
+            JavaDisplayManager.self, JavaAudioManager.self, JavaPowerManager.self, JavaInputManager.self, JavaInputDevice.self,
+            JavaUri.self, JavaWindow.self, JavaSharedPreferences.self, JavaSharedPreferencesEditor.self,
+            JavaSensorManager.self, JavaVibrator.self,
         ]
         for type in classes {
             runtime.defineClass(for: type)

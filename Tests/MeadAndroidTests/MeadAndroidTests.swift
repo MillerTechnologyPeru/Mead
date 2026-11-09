@@ -5,7 +5,8 @@ import Glibc
 import MeadCrypto
 @testable import MeadJava
 @testable import MeadMinecraft
-import MeadJNI
+@testable import MeadUnity
+@testable import MeadJNI
 import Testing
 
 // The pieces of libandroid.so on their own; the whole of it, with a real
@@ -288,6 +289,28 @@ private final class InputRecorder {
     #expect(recorder.motions[3].getRawX(0) == 30 && recorder.motions[3].getAxisValue(JavaMotionEvent.axisY, 0) == 40)
 }
 
+@Test func forATouchGameTheMouseIsAFinger() {
+    MinecraftFramework.register()
+    let recorder = InputRecorder()
+    recorder.input.mouseIsFinger = true
+    recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 5; $0.motion.y = 6 }
+    recorder.send { $0.button.type = UInt32(MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN); $0.button.button = 3; $0.button.down = true }
+    recorder.send { $0.button.type = UInt32(MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN); $0.button.button = 1; $0.button.down = true; $0.button.x = 10; $0.button.y = 20 }
+    recorder.send { $0.motion.type = UInt32(MEAD_SDL_EVENT_MOUSE_MOTION); $0.motion.x = 30; $0.motion.y = 40 }
+    recorder.send { $0.button.type = UInt32(MEAD_SDL_EVENT_MOUSE_BUTTON_UP); $0.button.button = 1; $0.button.x = 30; $0.button.y = 40 }
+    // What SDL makes up from a real touch isn't a second finger.
+    recorder.send { $0.button.type = UInt32(MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN); $0.button.button = 1; $0.button.down = true; $0.button.which = UInt32.max }
+    #expect(recorder.motions.map(\.action) == [JavaMotionEvent.actionDown, JavaMotionEvent.actionMove, JavaMotionEvent.actionUp])
+    #expect(recorder.motions.allSatisfy { $0.source == JavaMotionEvent.sourceTouchscreen && $0.getToolType(0) == JavaMotionEvent.toolTypeFinger })
+    #expect(recorder.motions[1].getX(0) == 30 && recorder.motions[1].getY() == 40)
+    #expect(recorder.motions[1].getActionMasked() == JavaMotionEvent.actionMove && recorder.motions[1].getPressure(0) == 1)
+    #expect(JavaMotionEvent.obtain(recorder.motions[1]) === recorder.motions[1])
+    #expect(JavaMotionEvent.obtain(nil) == nil)
+    recorder.send { $0.finger.type = UInt32(MEAD_SDL_EVENT_FINGER_DOWN); $0.finger.fingerID = 7; $0.finger.x = 0.5; $0.finger.y = 0.5 }
+    recorder.send { $0.finger.type = UInt32(MEAD_SDL_EVENT_FINGER_DOWN); $0.finger.fingerID = 9; $0.finger.x = 0.1; $0.finger.y = 0.5 }
+    #expect(recorder.motions.last?.getActionMasked() == JavaMotionEvent.actionPointerDown && recorder.motions.last?.getActionIndex() == 1)
+}
+
 @Test func twoFingersAreTwoPointers() {
     MinecraftFramework.register()
     let recorder = InputRecorder()
@@ -488,4 +511,312 @@ private final class InputRecorder {
 @Test func anImageThatCannotBeReadIsNull() {
     MinecraftFramework.register()
     #expect(JavaMinecraftActivity().getImageData("/nonexistent/image.png") == nil)
+}
+
+// Unity's Java player, and the frame callbacks its engine uses.
+
+@Test func unitysClassesAreDefined() {
+    UnityFramework.register()
+    for name in ["com/unity3d/player/UnityPlayer", "com/unity3d/player/UnityPlayerForActivityOrService",
+                 "com/unity3d/player/NativeLoader", "com/unity3d/player/UnityPlayerActivity"] {
+        #expect(JavaRuntime.shared.findClassPublic(named: name) != nil, "\(name)")
+    }
+}
+
+@Test func unitysMainThreadJobsRunOnceInOrder() {
+    UnityFramework.register()
+    let player = JavaUnityPlayerForActivityOrService(activity: JavaUnityPlayerActivity())
+    var order: [Int] = []
+    player.post { order.append(1) }
+    player.post { order.append(2) }
+    player.executeMainThreadJobs()
+    player.executeMainThreadJobs()
+    #expect(order == [1, 2])
+}
+
+nonisolated(unsafe) private var framesSeen: [Int64] = []
+
+@Test func choreographerCallbacksRunOnTheNextFrame() {
+    framesSeen = []
+    let callback: @convention(c) (Int64, UnsafeMutableRawPointer?) -> Void = { time, _ in framesSeen.append(time) }
+    let choreographer = AChoreographer_getInstance()
+    AChoreographer_postFrameCallback64(choreographer, unsafeBitCast(callback, to: UnsafeRawPointer.self), nil)
+    AChoreographer_postFrameCallbackDelayed64(choreographer, unsafeBitCast(callback, to: UnsafeRawPointer.self), nil, 60_000)
+    Choreographer.runFrame()
+    #expect(framesSeen.count == 1 && framesSeen[0] > 0, "the delayed one waits")
+    Choreographer.runFrame()
+    #expect(framesSeen.count == 1, "a callback runs once")
+}
+
+@Test func classForNameTakesJavasDottedNames() {
+    UnityFramework.register()
+    let thread = JavaRuntime.shared.attachCurrentThread()
+    thread.pushFrame()
+    defer { thread.popFrame() }
+    var name = jvalue()
+    name.l = thread.newLocal(JavaString("com.unity3d.player.UnityPlayer"))
+    let found = thread.call("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;", isStatic: true, on: nil, [name])
+    #expect((thread.resolve(found.l) as? JavaClass)?.name == "com/unity3d/player/UnityPlayer")
+    let loader = thread.call("java/lang/Class", "getClassLoader", "()Ljava/lang/ClassLoader;", on: thread.resolve(found.l), [])
+    #expect(thread.resolve(loader.l) is JavaClassLoader)
+    var library = jvalue()
+    library.l = thread.newLocal(JavaString("missing"))
+    let path = thread.call("java/lang/ClassLoader", "findLibrary", "(Ljava/lang/String;)Ljava/lang/String;",
+                           on: thread.resolve(loader.l), [library])
+    #expect(path.l == nil)
+    #expect(JavaRuntime.shared.findClassPublic(named: "java/lang/ClassLoader").map { $0.findMethod(MemberKey(name: "findLibrary", signature: "(Ljava/lang/String;)Ljava/lang/String;"))?.isSynthesized == false } == true)
+}
+
+// Java's text and stream classes.
+
+// Proxies, and Android's message loop, which Unity paces its frames through.
+
+@Test func aProxysCallsGoToItsHandler() {
+    JavaFramework.register()
+    let thread = JavaRuntime.shared.attachCurrentThread()
+    thread.pushFrame()
+    defer { thread.popFrame() }
+    let callback = JavaRuntime.shared.findClassPublic(named: "android/os/Handler$Callback")!
+    var seen: [String] = []
+    let proxy = JavaProxy(interfaces: [callback]) { _, method, _ in
+        seen.append("\(method.owner.name).\(method.name)")
+        var handled = jvalue()
+        handled.z = 1
+        return handled
+    }
+    #expect(proxy.javaClass.isSubclass(of: callback))
+    var message = jvalue()
+    message.l = thread.newLocal(JavaMessage())
+    let result = thread.call("android/os/Handler$Callback", "handleMessage", "(Landroid/os/Message;)Z", on: proxy, [message])
+    #expect(result.z == 1)
+    #expect(seen == ["android/os/Handler$Callback.handleMessage"])
+    let method = JavaRuntime.shared.findClassPublic(named: "android/view/Choreographer$FrameCallback")!
+        .method(named: "doFrame", signature: "(J)V", isStatic: false)
+    #expect(method?.parameterTypes == ["J"])
+    #expect(method?.returnType == "V")
+}
+
+@Test func aHandlerDeliversMessagesThroughItsLooper() {
+    JavaFramework.register()
+    let looper = JavaLooper()
+    var delivered: [Int32] = []
+    let callback = JavaProxy(interfaces: [JavaRuntime.shared.findClassPublic(named: "android/os/Handler$Callback")!]) { thread, _, arguments in
+        delivered.append((thread.resolve(arguments![0].l) as? JavaMessage)?.what ?? -1)
+        var handled = jvalue()
+        handled.z = 1
+        return handled
+    }
+    let handler = JavaHandler(queue: looper, callback: callback)
+    handler.obtainMessage(3)?.sendToTarget()
+    #expect(handler.sendEmptyMessage(5))
+    #expect(handler.sendEmptyMessageDelayed(9, 10_000))
+    #expect(handler.hasMessages(9))
+    handler.removeMessages(9)
+    #expect(!handler.hasMessages(9))
+    looper.runDue()
+    #expect(delivered == [3, 5])
+}
+
+@Test func aHandlerThreadRunsItsOwnLooper() {
+    JavaFramework.register()
+    let worker = JavaHandlerThread(name: "UnityChoreograp")
+    worker.start()
+    let looper = worker.getLooper()
+    #expect(looper != nil)
+    let done = LockedValue(false)
+    looper?.post { done.withLock { $0 = true } }
+    for _ in 0..<500 where !done.withLock({ $0 }) { usleep(1000) }
+    #expect(done.withLock { $0 })
+    _ = worker.quit()
+}
+
+@Test func theChoreographerCallsBackOnTheNextFrame() {
+    JavaFramework.register()
+    let looper = JavaLooper()
+    JavaLooper.setCurrent(looper)
+    let frames = LockedValue([Int64]())
+    let callback = JavaProxy(interfaces: [JavaRuntime.shared.findClassPublic(named: "android/view/Choreographer$FrameCallback")!]) { _, _, arguments in
+        frames.withLock { $0.append(arguments![0].j) }
+        return jvalue()
+    }
+    let choreographer = JavaChoreographer.getInstance()
+    #expect(choreographer?.looper === looper)
+    choreographer?.postFrameCallback(callback)
+    looper.runDue()
+    #expect(frames.withLock { $0 }.isEmpty)
+    usleep(UInt32(JavaChoreographer.frameInterval / 1000) + 2000)
+    looper.runDue()
+    #expect(frames.withLock { $0 }.count == 1)
+    #expect((frames.withLock { $0 }.first ?? 0) > 0)
+}
+
+@Test func unitysBridgeBoxesWhatItPasses() {
+    UnityFramework.register()
+    let thread = JavaRuntime.shared.attachCurrentThread()
+    thread.pushFrame()
+    defer { thread.popFrame() }
+    var long = jvalue()
+    long.j = 1234
+    #expect((JavaJNIBridge.box(long, as: "J", in: thread) as? JavaLong)?.value == 1234)
+    var flag = jvalue()
+    flag.z = 1
+    #expect((JavaJNIBridge.box(flag, as: "Z", in: thread) as? JavaBoolean)?.value == true)
+    #expect(JavaJNIBridge.unbox(JavaBoolean(value: true), as: "Z", in: thread).z == 1)
+    #expect(JavaJNIBridge.unbox(JavaInteger(value: 7), as: "I", in: thread).i == 7)
+    let array = JavaRuntime.shared.newObjectArray(elementClass: "java/lang/Class", count: 0) as! JavaObjectArray
+    array.elements = [JavaRuntime.shared.findClassPublic(named: "java/lang/Runnable")]
+    let proxy = JavaJNIBridge.newInterfaceProxy(1, array)
+    #expect(proxy?.javaClass.isSubclass(of: JavaRuntime.shared.findClassPublic(named: "java/lang/Runnable")!) == true)
+    JavaJNIBridge.disableInterfaceProxy(proxy)
+    // Disabled, a call reaches nothing.
+    thread.call("java/lang/Runnable", "run", "()V", on: proxy)
+}
+
+@Test func preferencesOutlastTheirObject() {
+    JavaFramework.register()
+    let path = "/tmp/mead-prefs-\(getpid()).prefs"
+    defer { remove(path) }
+    let preferences = JavaSharedPreferences(path: path)
+    let editor = preferences.edit()
+    _ = editor?.putString("name with space", "line\none \\ two")
+    _ = editor?.putInt("level", 12)
+    _ = editor?.putFloat("volume", 0.5)
+    _ = editor?.putBoolean("music", true)
+    editor?.apply()
+    let reread = JavaSharedPreferences(path: path)
+    #expect(reread.getString("name with space", nil) == "line\none \\ two")
+    #expect(reread.getInt("level", 0) == 12)
+    #expect(reread.getFloat("volume", 0) == 0.5)
+    #expect(reread.getBoolean("music", false))
+    #expect(reread.getInt("missing", 7) == 7)
+    #expect(reread.getAll()?.size() == 4)
+    _ = reread.edit()?.remove("level")?.commit()
+    #expect(!JavaSharedPreferences(path: path).contains("level"))
+}
+
+@Test func aMapsEntriesCanBeWalked() throws {
+    JavaFramework.register()
+    let map = JavaHashMap()
+    _ = map.put(JavaString("a"), JavaInteger(value: 1))
+    let iterator = map.entrySet()?.iterator()
+    #expect(iterator?.hasNext() == true)
+    let entry = try iterator?.next() as? JavaMapEntry
+    #expect((entry?.getKey() as? JavaString)?.swiftValue == "a")
+    #expect((entry?.getValue() as? JavaInteger)?.value == 1)
+    #expect(iterator?.hasNext() == false)
+}
+
+@Test func theLocaleAndDisplayAreADesktops() {
+    JavaFramework.register()
+    #expect(JavaUri.encode("a b/c?é") == "a%20b%2Fc%3F%C3%A9")
+    #expect(JavaConfiguration().getLocales()?.get(0)?.toLanguageTag() == "en-US")
+    DisplaySize.current.withLock { $0 = (1366, 768) }
+    #expect(JavaDisplay().getWidth() == 1366)
+    #expect(JavaWindowManager().getMaximumWindowMetrics()?.getBounds()?.height() == 768)
+    #expect(JavaUnityPlayerActivity().getSystemService("audio") is JavaAudioManager)
+    #expect(JavaAudioManager().getProperty(JavaAudioManager.outputSampleRate) == "48000")
+}
+
+@Test func aFileKnowsItsParentAndName() {
+    #expect(JavaFile(path: "/data/data/net.defensezone2/files").getParent() == "/data/data/net.defensezone2")
+    #expect(JavaFile(path: "/data/files/").getParent() == "/data")
+    #expect(JavaFile(path: "/files").getParent() == "/")
+    #expect(JavaFile(path: "/").getParent() == nil)
+    #expect(JavaFile(path: "files").getParent() == nil)
+    #expect(JavaFile(path: "/data/files/").getName() == "files")
+    #expect(JavaFile(path: "/tmp").getUsableSpace() > 0)
+}
+
+@Test func stringsAreEqualByTheirText() {
+    JavaFramework.register()
+    let thread = JavaRuntime.shared.attachCurrentThread()
+    thread.pushFrame()
+    defer { thread.popFrame() }
+    var other = jvalue()
+    other.l = thread.newLocal(JavaString(JavaEnvironment.mediaMounted ?? ""))
+    let same = thread.call("java/lang/String", "equals", "(Ljava/lang/Object;)Z", on: JavaString("mounted"), [other])
+    #expect(same.z == 1)
+    other.l = thread.newLocal(JavaString("removed"))
+    let different = thread.call("java/lang/String", "equals", "(Ljava/lang/Object;)Z", on: JavaString("mounted"), [other])
+    #expect(different.z == 0)
+    #expect(JavaString("a").javaHashCode() == 97)
+}
+
+@Test func anAlertDialogKeepsItsTitleAndMessage() {
+    JavaFramework.register()
+    let builder = JavaAlertDialogBuilder(context: nil)
+    _ = builder.setTitle(JavaString("Failure to initialize!"))
+    _ = builder.setMessage(JavaStringBuilder(text: "Your hardware does not support this application."))
+    let dialog = builder.create()
+    #expect(dialog?.title == "Failure to initialize!")
+    #expect(dialog?.message == "Your hardware does not support this application.")
+}
+
+@Test func aStringBuilderBuildsAString() {
+    JavaFramework.register()
+    let builder = JavaStringBuilder(text: "Unity ")
+    _ = builder.append(int: 6)
+    _ = builder.append(char: 0x2e)  // "."
+    _ = builder.append(long: 3)
+    _ = builder.append(string: nil)
+    #expect(builder.javaToString() == "Unity 6.3null" && builder.length() == 13)
+}
+
+@Test func aScannerReadsAWholeAssetOrItsWords() throws {
+    JavaFramework.register()
+    let directory = "/tmp/mead-assets-\(getpid())"
+    _ = AndroidEnvironment.makeDirectories("\(directory)/assets/bin")
+    let file = fopen("\(directory)/assets/bin/settings.txt", "w")!
+    fputs("gfx-enable-gfx-jobs=1\nwait-for-native-debugger=0\n", file)
+    fclose(file)
+    setenv("MEAD_DATA_DIR", directory, 1)
+    defer { unsetenv("MEAD_DATA_DIR") }
+
+    let manager = JavaAssetManager()
+    let whole = JavaScanner(stream: try manager.open("bin/settings.txt"), charset: "UTF-8")
+    _ = whole.useDelimiter("\\A")
+    #expect(try whole.next() == "gfx-enable-gfx-jobs=1\nwait-for-native-debugger=0\n")
+    #expect(!whole.hasNext())
+
+    let words = JavaScanner(stream: try manager.open("bin/settings.txt"))
+    #expect(try words.next() == "gfx-enable-gfx-jobs=1")
+    #expect(try words.next() == "wait-for-native-debugger=0")
+    #expect(throws: JavaException.self) { try words.next() }
+    #expect(throws: JavaException.self) { try manager.open("missing.txt") }
+}
+
+@Test func anInputStreamReadsIntoAnArray() throws {
+    JavaFramework.register()
+    let stream = JavaInputStream(bytes: [1, 2, 3, 4, 5])
+    let array = JavaRuntime.shared.newByteArray([0, 0, 0]) as! JavaPrimitiveArray
+    #expect(try stream.read(array) == 3)
+    #expect(array.storage.load(fromByteOffset: 2, as: UInt8.self) == 3)
+    #expect(stream.read() == 4 && stream.available() == 1)
+    #expect(try stream.read(array, 0, 3) == 1)
+    #expect(try stream.read(array, 0, 3) == -1)
+}
+
+@Test func theAppIsInstalledFromItsAPKs() {
+    JavaFramework.register()
+    let directory = "/tmp/mead-apks-\(getpid())"
+    _ = AndroidEnvironment.makeDirectories(directory)
+    for name in ["base.apk", "split_b.apk", "split_a.apk", "other.apk"] {
+        fclose(fopen("\(directory)/\(name)", "w"))
+    }
+    setenv("MEAD_DATA_DIR", directory, 1)
+    defer { unsetenv("MEAD_DATA_DIR") }
+    let context = JavaContext()
+    #expect(context.getPackageCodePath() == "\(directory)/base.apk")
+    let info = JavaApplicationInfo()
+    let splits = (info.splitSourceDirs as? JavaObjectArray)?.elements.compactMap { ($0 as? JavaString)?.swiftValue }
+    #expect(splits == ["\(directory)/split_a.apk", "\(directory)/split_b.apk"])
+    let publicSplits = (info.splitPublicSourceDirs as? JavaObjectArray)?.elements.compactMap { ($0 as? JavaString)?.swiftValue }
+    #expect(publicSplits == splits)
+    #expect(info.nativeLibraryDir == "\(directory)/lib/arm64-v8a")
+    _ = AndroidEnvironment.makeDirectories("\(directory)/lib/arm64-v8a")
+    fclose(fopen("\(directory)/lib/arm64-v8a/libil2cpp.so", "w"))
+    let loader = JavaClassLoader()
+    #expect(loader.findLibrary("il2cpp") == "\(directory)/lib/arm64-v8a/libil2cpp.so")
+    #expect(loader.findLibrary("missing") == nil)
+    #expect(JavaEnvironment.getExternalStorageState() == JavaEnvironment.mediaMounted)
 }

@@ -8,6 +8,8 @@
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <fnmatch.h>
+#include <libgen.h>
 #include <fcntl.h>
 #include <link.h>
 #include <malloc.h>
@@ -111,6 +113,49 @@ static int test_small_stacks(void) {
     CHECK(pthread_join(thread, NULL) == 0);
     CHECK(result == 3);
     pthread_attr_destroy(&attr);
+    return 0;
+}
+
+// basename is libgen's: a trailing slash is ignored and the path is kept.
+static int test_basename_and_fnmatch(void) {
+    char path[] = "/usr/lib/";
+    CHECK(strcmp(basename(path), "lib") == 0);
+    CHECK(strcmp(path, "/usr/lib/") == 0);
+    CHECK(strcmp(basename("libunity.so"), "libunity.so") == 0);
+    CHECK(strcmp(basename("/"), "/") == 0);
+    CHECK(strcmp(basename(""), ".") == 0);
+    CHECK(fnmatch("*.so", "libmain.so", 0) == 0);
+    CHECK(fnmatch("lib?ain.so", "libmain.so", 0) == 0);
+    CHECK(fnmatch("*.so", "libmain.a", 0) == FNM_NOMATCH);
+    return 0;
+}
+
+// sigsuspend takes bionic's one-word set: with SIGUSR1 pending under a
+// blocked mask, suspending with an empty mask delivers it and returns EINTR.
+static volatile sig_atomic_t suspended_signal;
+static void note_suspended_signal(int number) { suspended_signal = number; }
+
+static int test_sigsuspend(void) {
+    struct sigaction action, old_action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = note_suspended_signal;
+    CHECK(sigaction(SIGUSR1, &action, &old_action) == 0);
+    sigset_t blocked, old_mask, none;
+    sigemptyset(&blocked);
+    sigaddset(&blocked, SIGUSR1);
+    CHECK(sigprocmask(SIG_BLOCK, &blocked, &old_mask) == 0);
+    suspended_signal = 0;
+    CHECK(raise(SIGUSR1) == 0);
+    CHECK(suspended_signal == 0);
+    sigemptyset(&none);
+    CHECK(sigsuspend(&none) == -1 && errno == EINTR);
+    CHECK(suspended_signal == SIGUSR1);
+    CHECK(sigprocmask(SIG_SETMASK, &old_mask, NULL) == 0);
+    CHECK(sigaction(SIGUSR1, &old_action, NULL) == 0);
+    srand48(7);
+    long first = lrand48();
+    srand48(7);
+    CHECK(lrand48() == first && first >= 0);
     return 0;
 }
 
@@ -386,7 +431,7 @@ int mead_selftest(void) {
     int (*const tests[])(void) = {
         test_stdio,    test_signals,          test_sysconf,           test_addrinfo,
         test_threads,  test_mutexes,          test_memory_and_jumps,  test_strings_and_files,
-        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,
+        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,      test_basename_and_fnmatch, test_sigsuspend,
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
         int failed = tests[index]();

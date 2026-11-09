@@ -116,3 +116,8 @@ int bionic_pthread_sigmask(int how, const bionic_sigset *set, bionic_sigset *old
         *old = from_host_set(&host_old);
     return result;
 }
+
+int bionic_sigsuspend(const bionic_sigset *set) {
+    sigset_t host_set = to_host_set(*set);
+    return sigsuspend(&host_set);
+}

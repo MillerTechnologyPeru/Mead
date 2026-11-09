@@ -61,7 +61,7 @@ public final class JavaRuntime {
     let strict = environmentFlag("MEAD_STRICT")
     let tracing = traceRequested()
 
-    private var classesByName: [String: JavaClass] = [:]
+    var classesByName: [String: JavaClass] = [:]
     private var classesBySwiftType: [ObjectIdentifier: JavaClass] = [:]
     private var started = false
     private var reported = Set<String>()
@@ -120,6 +120,7 @@ public final class JavaRuntime {
             defineClass(for: JavaThrowable.self)
             defineClass(for: JavaDirectBuffer.self)
             defineClass(for: JavaReflectedMember.self)
+            defineClass(for: JavaReflectedMethod.self)
             for (name, parent) in standardExceptions {
                 defineStandardClass(name, parent: parent)
             }

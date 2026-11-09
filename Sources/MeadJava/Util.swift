@@ -100,6 +100,68 @@ public final class JavaHashMap: JavaObject {
     @JavaMethod("remove") public func remove(_ key: JavaObject?) -> JavaObject? {
         entries.removeValue(forKey: MapKey(object: key)) ?? nil
     }
+
+    @JavaMethod("entrySet", signature: "()Ljava/util/Set;") public func entrySet() -> JavaCollection? {
+        JavaCollection(entries.map { JavaMapEntry(key: $0.key.object, value: $0.value) })
+    }
+
+    @JavaMethod("keySet", signature: "()Ljava/util/Set;") public func keySet() -> JavaCollection? {
+        JavaCollection(entries.keys.map(\.object))
+    }
+
+    @JavaMethod("values", signature: "()Ljava/util/Collection;") public func values() -> JavaCollection? {
+        JavaCollection(Array(entries.values))
+    }
+}
+
+/// What a map's entrySet, keySet and values are: a fixed set of elements
+/// to iterate.
+@JavaClass("java/util/HashSet", implements: ["java/util/Set"])
+public final class JavaCollection: JavaObject {
+    public let elements: [JavaObject?]
+
+    public init(_ elements: [JavaObject?]) {
+        self.elements = elements
+        super.init()
+    }
+
+    @JavaMethod("size") public func size() -> Int32 { Int32(elements.count) }
+    @JavaMethod("isEmpty") public func isEmpty() -> Bool { elements.isEmpty }
+    @JavaMethod("iterator", signature: "()Ljava/util/Iterator;") public func iterator() -> JavaIterator? { JavaIterator(elements) }
+}
+
+@JavaClass("java/util/ArrayList$Itr", implements: ["java/util/Iterator"])
+public final class JavaIterator: JavaObject {
+    private let elements: [JavaObject?]
+    private var position = 0
+
+    public init(_ elements: [JavaObject?]) {
+        self.elements = elements
+        super.init()
+    }
+
+    @JavaMethod("hasNext") public func hasNext() -> Bool { position < elements.count }
+
+    @JavaMethod("next", signature: "()Ljava/lang/Object;") public func next() throws -> JavaObject? {
+        guard position < elements.count else { throw JavaException("java/util/NoSuchElementException", "") }
+        defer { position += 1 }
+        return elements[position]
+    }
+}
+
+@JavaClass("java/util/AbstractMap$SimpleEntry", implements: ["java/util/Map$Entry"])
+public final class JavaMapEntry: JavaObject {
+    public let key: JavaObject?
+    public let value: JavaObject?
+
+    public init(key: JavaObject?, value: JavaObject?) {
+        self.key = key
+        self.value = value
+        super.init()
+    }
+
+    @JavaMethod("getKey", signature: "()Ljava/lang/Object;") public func getKey() -> JavaObject? { key }
+    @JavaMethod("getValue", signature: "()Ljava/lang/Object;") public func getValue() -> JavaObject? { value }
 }
 
 @JavaClass("java/util/UUID")
@@ -140,6 +202,14 @@ public final class JavaLocale: JavaObject {
     @JavaMethod("getLanguage") public func getLanguage() -> String? { "en" }
     @JavaMethod("getCountry") public func getCountry() -> String? { "US" }
     @JavaMethod("toString") public func javaToString() -> String? { "en_US" }
+    @JavaMethod("toLanguageTag") public func toLanguageTag() -> String? { "en-US" }
+    @JavaMethod("getVariant") public func getVariant() -> String? { "" }
+    @JavaMethod("getScript") public func getScript() -> String? { "" }
+    @JavaMethod("getISO3Language") public func getISO3Language() -> String? { "eng" }
+    @JavaMethod("getISO3Country") public func getISO3Country() -> String? { "USA" }
+    @JavaMethod("getDisplayLanguage", signature: "()Ljava/lang/String;") public func getDisplayLanguage() -> String? { "English" }
+    @JavaMethod("getDisplayCountry", signature: "()Ljava/lang/String;") public func getDisplayCountry() -> String? { "United States" }
+    @JavaMethod("getDisplayName", signature: "()Ljava/lang/String;") public func getDisplayName() -> String? { "English (United States)" }
 }
 
 @JavaClass("java/io/File")
@@ -163,4 +233,39 @@ public final class JavaFile: JavaObject {
     }
 
     @JavaMethod("delete") public func delete() -> Bool { remove(path) == 0 }
+
+    /// The path without its last part, as Java has it: nil when there is
+    /// no slash, "/" for something in the root. Java's File drops a
+    /// trailing slash when it's made, so one is dropped first here too.
+    @JavaMethod("getParent") public func getParent() -> String? {
+        var trimmed = Substring(path)
+        while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed = trimmed.dropLast() }
+        guard let slash = trimmed.lastIndex(of: "/") else { return nil }
+        if slash == trimmed.startIndex { return trimmed.count > 1 ? "/" : nil }
+        return String(trimmed[..<slash])
+    }
+
+    @JavaMethod("getParentFile") public func getParentFile() -> JavaFile? { getParent().map { JavaFile(path: $0) } }
+
+    @JavaMethod("getName") public func getName() -> String? {
+        var trimmed = Substring(path)
+        while trimmed.count > 1, trimmed.hasSuffix("/") { trimmed = trimmed.dropLast() }
+        return trimmed.lastIndex(of: "/").map { String(trimmed[trimmed.index(after: $0)...]) } ?? String(trimmed)
+    }
+
+    @JavaMethod("getCanonicalPath") public func getCanonicalPath() -> String? {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    private func space(_ measure: (statvfs) -> UInt64) -> Int64 {
+        var status = statvfs()
+        guard statvfs(path, &status) == 0 else { return 0 }
+        return Int64(clamping: measure(status) * UInt64(status.f_frsize))
+    }
+
+    @JavaMethod("getTotalSpace") public func getTotalSpace() -> Int64 { space { UInt64($0.f_blocks) } }
+    @JavaMethod("getFreeSpace") public func getFreeSpace() -> Int64 { space { UInt64($0.f_bfree) } }
+    @JavaMethod("getUsableSpace") public func getUsableSpace() -> Int64 { space { UInt64($0.f_bavail) } }
 }

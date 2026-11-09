@@ -135,6 +135,7 @@ public func ANativeWindow_getFormat(_ pointer: UnsafeMutableRawPointer) -> Int32
 @_cdecl("ANativeWindow_setBuffersGeometry")
 public func ANativeWindow_setBuffersGeometry(_ pointer: UnsafeMutableRawPointer, _ width: Int32, _ height: Int32, _ format: Int32) -> Int32 {
     let target = window(pointer)
+    JavaRuntime.shared.trace("ANativeWindow_setBuffersGeometry \(width)x\(height), the window being \(target.pixelWidth)x\(target.pixelHeight)")
     target.bufferWidth = width
     target.bufferHeight = height
     if format != 0 {
