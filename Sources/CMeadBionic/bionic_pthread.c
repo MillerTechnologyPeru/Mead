@@ -2,6 +2,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <dlfcn.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <stdatomic.h>
@@ -200,6 +201,10 @@ _Static_assert(sizeof(bionic_attr) == 56, "bionic's pthread_attr_t is 56 bytes")
 enum { BIONIC_EXPLICIT_SCHED = 0, BIONIC_INHERIT_SCHED = 1 };
 enum { DEFAULT_STACK = 1024 * 1024, DEFAULT_GUARD = 4096 };
 
+// bionic's smallest stack on 64-bit, which Android code is written against.
+// glibc's is 128 KB on arm64: a size bionic takes, glibc would refuse.
+enum { BIONIC_STACK_MIN = 16 * 1024 };
+
 int bionic_pthread_attr_init(bionic_attr *attr) {
     memset(attr, 0, sizeof(*attr));
     attr->stack_size = DEFAULT_STACK;
@@ -226,7 +231,7 @@ int bionic_pthread_attr_getdetachstate(const bionic_attr *attr, int *state) {
 }
 
 int bionic_pthread_attr_setstacksize(bionic_attr *attr, size_t size) {
-    if (size < PTHREAD_STACK_MIN)
+    if (size < BIONIC_STACK_MIN)
         return EINVAL;
     attr->stack_size = size;
     return 0;
@@ -357,7 +362,19 @@ pid_t bionic_pthread_gettid_np(pthread_t thread) {
             break;
         }
     pthread_mutex_unlock(&known_lock);
-    return tid;
+    if (tid != -1)
+        return tid;
+    // A thread made some other way: the process's first, or one SDL or the
+    // host's libraries started. glibc says, from 2.42 on; before that, no
+    // thread is left without an answer that is the caller's own, and -1
+    // stands for "unknown", which callers check for.
+    static pid_t (*host)(pthread_t);
+    static int looked;
+    if (!looked) {
+        host = (pid_t (*)(pthread_t))dlsym(RTLD_DEFAULT, "pthread_gettid_np");
+        looked = 1;
+    }
+    return host ? host(thread) : -1;
 }
 
 // bionic keeps pthread_cleanup_push's records itself, in the caller's frame.
@@ -425,7 +442,11 @@ int bionic_pthread_create(pthread_t *thread, const bionic_attr *attr, void *(*fu
         pthread_attr_setdetachstate(&host, attr->detached ? PTHREAD_CREATE_DETACHED
                                                           : PTHREAD_CREATE_JOINABLE);
         size_t extra = bionic_loader ? bionic_loader->thread_tls_bytes : 0;
-        pthread_attr_setstacksize(&host, attr->stack_size + extra);
+        // At least glibc's minimum: a bionic-sized stack can be smaller.
+        size_t size = attr->stack_size + extra;
+        if (size < PTHREAD_STACK_MIN)
+            size = PTHREAD_STACK_MIN;
+        pthread_attr_setstacksize(&host, size);
         pthread_attr_setguardsize(&host, attr->guard_size);
         given = &host;
     }
