@@ -96,12 +96,6 @@ public final class JavaWindowManager: JavaObject {
     @JavaMethod("getDefaultDisplay") public func getDefaultDisplay() -> JavaDisplay? { display }
 }
 
-@JavaClass("com/google/androidgamesdk/gametextinput/InputConnection")
-public final class JavaTextInputConnection: JavaObject {
-    @JavaMethod("setSoftKeyboardActive") public func setSoftKeyboardActive(_ active: Bool, _ flags: Int32) {}
-    @JavaMethod("restartInput") public func restartInput() {}
-}
-
 @JavaClass("com/mojang/minecraftpe/NetworkMonitor")
 public final class JavaNetworkMonitor: JavaObject {}
 
@@ -255,6 +249,19 @@ public final class JavaMinecraftActivity: JavaGameActivity {
 
     @JavaMethod("lockCursor") public func lockCursor() { Self.cursorLocked = true }
     @JavaMethod("unlockCursor") public func unlockCursor() { Self.cursorLocked = false }
+
+    /// The text box the game has open, through its own keyboard calls rather
+    /// than GameActivity's. Whatever runs the window types into it and tells
+    /// the game with nativeSetTextboxText and nativeCaretPosition.
+    public static let textBox = TextBox()
+
+    @JavaMethod("showKeyboard", signature: "(Ljava/lang/String;IZZZ)V")
+    public func showKeyboard(_ text: String?, _ maxLength: Int32, _ limitInput: Bool, _ numbersOnly: Bool, _ multiline: Bool) {
+        Self.textBox.open(text: text ?? "", maxLength: Int(maxLength), multiline: multiline)
+    }
+    @JavaMethod("hideKeyboard") public func hideKeyboard() { Self.textBox.setActive(false) }
+    @JavaMethod("getCaretPosition") public func getCaretPosition() -> Int32 { Int32(Self.textBox.current.start) }
+    @JavaMethod("setCaretPosition") public func setCaretPosition(_ position: Int32) { Self.textBox.setCaret(Int(position)) }
 
     @JavaMethod("getInternalStoragePath") public func getInternalStoragePath() -> String? { AndroidEnvironment.filesDirectory }
     @JavaMethod("getExternalStoragePath") public func getExternalStoragePath() -> String? { AndroidEnvironment.externalDirectory }
