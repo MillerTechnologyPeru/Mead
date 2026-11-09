@@ -31,6 +31,12 @@ enum {
 
 #define MEAD_SDL_WINDOW_RESIZABLE 0x20ull
 
+#define MEAD_SDL_PROP_X11_DISPLAY "SDL.window.x11.display"
+#define MEAD_SDL_PROP_X11_WINDOW "SDL.window.x11.window"
+#define MEAD_SDL_PROP_WAYLAND_DISPLAY "SDL.window.wayland.display"
+#define MEAD_SDL_PROP_WAYLAND_SURFACE "SDL.window.wayland.surface"
+#define MEAD_SDL_PROP_WAYLAND_EGL_WINDOW "SDL.window.wayland.egl_window"
+
 typedef struct mead_sdl_common_event {
     uint32_t type;
     uint32_t reserved;
