@@ -27,6 +27,7 @@ enum {
     MEAD_SDL_EVENT_WINDOW_CLOSE_REQUESTED = 0x210,
     MEAD_SDL_EVENT_KEY_DOWN = 0x300,
     MEAD_SDL_EVENT_KEY_UP = 0x301,
+    MEAD_SDL_EVENT_TEXT_INPUT = 0x303,
     MEAD_SDL_EVENT_MOUSE_MOTION = 0x400,
     MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN = 0x401,
     MEAD_SDL_EVENT_MOUSE_BUTTON_UP = 0x402,
@@ -128,6 +129,14 @@ typedef struct mead_sdl_keyboard_event {
     bool repeat;
 } mead_sdl_keyboard_event;
 
+typedef struct mead_sdl_text_input_event {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t timestamp;
+    uint32_t windowID;
+    const char *text;
+} mead_sdl_text_input_event;
+
 typedef struct mead_sdl_mouse_motion_event {
     uint32_t type;
     uint32_t reserved;
@@ -218,6 +227,7 @@ typedef union mead_sdl_event {
     mead_sdl_common_event common;
     mead_sdl_window_event window;
     mead_sdl_keyboard_event key;
+    mead_sdl_text_input_event text;
     mead_sdl_mouse_motion_event motion;
     mead_sdl_mouse_button_event button;
     mead_sdl_mouse_wheel_event wheel;
