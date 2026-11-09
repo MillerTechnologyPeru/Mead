@@ -186,7 +186,25 @@ public final class JavaClass: JavaObject {
                 value.l = thread.newLocal(JavaString((receiver as! JavaClass).name.replacingSlashes()))
                 return value
             },
+            // What FindClass would give for the same name, as Java writes it,
+            // with dots: Unity finds every class it uses this way.
+            .method(name: "forName", signature: "(Ljava/lang/String;)Ljava/lang/Class;", isStatic: true) { thread, _, arguments in
+                try forName(thread, arguments)
+            },
+            .method(name: "forName", signature: "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;",
+                    isStatic: true) { thread, _, arguments in
+                try forName(thread, arguments)
+            },
         ]
+    }
+
+    private static func forName(_ thread: JavaThread, _ arguments: UnsafePointer<jvalue>?) throws -> jvalue {
+        guard let name = (thread.resolve(arguments?[0].l) as? JavaString)?.swiftValue else {
+            throw JavaException("java/lang/NullPointerException", "Class.forName(null)")
+        }
+        var value = jvalue()
+        value.l = thread.newLocal(JavaRuntime.shared.findClassPublic(named: String(name.map { $0 == "." ? "/" : $0 })))
+        return value
     }
 
     public let name: String
