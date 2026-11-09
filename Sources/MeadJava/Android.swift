@@ -53,6 +53,19 @@ public final class JavaSurface: JavaObject {
     }
 }
 
+/// FMOD's Java half, which its native half asks what the device can do. The
+/// answers send it down its native AAudio path; a stand-in's zeros would send
+/// it to android.media.AudioTrack, which nothing here implements.
+@JavaClass("org/fmod/FMOD")
+public final class JavaFMOD: JavaObject {
+    @JavaMethod("checkInit") public static func checkInit() -> Bool { true }
+    @JavaMethod("supportsLowLatency") public static func supportsLowLatency() -> Bool { true }
+    @JavaMethod("supportsAAudio") public static func supportsAAudio() -> Bool { true }
+    @JavaMethod("getOutputSampleRate") public static func getOutputSampleRate() -> Int32 { 48000 }
+    @JavaMethod("getOutputBlockSize") public static func getOutputBlockSize() -> Int32 { 240 }
+    @JavaMethod("getAssetManager") public static func getAssetManager() -> JavaAssetManager? { JavaAssetManager() }
+}
+
 @JavaClass("android/os/Build")
 public final class JavaBuild: JavaObject {
     @JavaField("BOARD") public static var board: String? = "mead"
