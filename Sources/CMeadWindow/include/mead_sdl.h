@@ -21,6 +21,7 @@ enum {
 
     MEAD_SDL_EVENT_QUIT = 0x100,
     MEAD_SDL_EVENT_WINDOW_RESIZED = 0x206,
+    MEAD_SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED = 0x207,
     MEAD_SDL_EVENT_WINDOW_FOCUS_GAINED = 0x20e,
     MEAD_SDL_EVENT_WINDOW_FOCUS_LOST = 0x20f,
     MEAD_SDL_EVENT_WINDOW_CLOSE_REQUESTED = 0x210,
@@ -29,6 +30,7 @@ enum {
     MEAD_SDL_EVENT_MOUSE_MOTION = 0x400,
     MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN = 0x401,
     MEAD_SDL_EVENT_MOUSE_BUTTON_UP = 0x402,
+    MEAD_SDL_EVENT_MOUSE_WHEEL = 0x403,
     MEAD_SDL_EVENT_FINGER_DOWN = 0x700,
     MEAD_SDL_EVENT_FINGER_UP = 0x701,
     MEAD_SDL_EVENT_FINGER_MOTION = 0x702,
@@ -62,6 +64,21 @@ enum {
     MEAD_SDL_GAMEPAD_AXIS_RIGHT_TRIGGER = 5,
 
     MEAD_SDL_BUTTON_LEFT = 1,
+    MEAD_SDL_BUTTON_MIDDLE = 2,
+    MEAD_SDL_BUTTON_RIGHT = 3,
+
+    MEAD_SDL_MOUSEWHEEL_FLIPPED = 1,
+
+    MEAD_SDL_KMOD_LSHIFT = 0x0001,
+    MEAD_SDL_KMOD_RSHIFT = 0x0002,
+    MEAD_SDL_KMOD_LCTRL = 0x0040,
+    MEAD_SDL_KMOD_RCTRL = 0x0080,
+    MEAD_SDL_KMOD_LALT = 0x0100,
+    MEAD_SDL_KMOD_RALT = 0x0200,
+    MEAD_SDL_KMOD_LGUI = 0x0400,
+    MEAD_SDL_KMOD_RGUI = 0x0800,
+    MEAD_SDL_KMOD_NUM = 0x1000,
+    MEAD_SDL_KMOD_CAPS = 0x2000,
 };
 
 #define MEAD_SDL_WINDOW_RESIZABLE 0x20ull
@@ -138,6 +155,19 @@ typedef struct mead_sdl_mouse_button_event {
     float y;
 } mead_sdl_mouse_button_event;
 
+typedef struct mead_sdl_mouse_wheel_event {
+    uint32_t type;
+    uint32_t reserved;
+    uint64_t timestamp;
+    uint32_t windowID;
+    uint32_t which;
+    float x;
+    float y;
+    uint32_t direction;
+    float mouse_x;
+    float mouse_y;
+} mead_sdl_mouse_wheel_event;
+
 typedef struct mead_sdl_touch_event {
     uint32_t type;
     uint32_t reserved;
@@ -190,6 +220,7 @@ typedef union mead_sdl_event {
     mead_sdl_keyboard_event key;
     mead_sdl_mouse_motion_event motion;
     mead_sdl_mouse_button_event button;
+    mead_sdl_mouse_wheel_event wheel;
     mead_sdl_touch_event finger;
     mead_sdl_gamepad_device_event gdevice;
     mead_sdl_gamepad_button_event gbutton;
