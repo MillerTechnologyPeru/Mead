@@ -24,11 +24,11 @@ public final class JavaThread {
         block.deallocate()
     }
 
-    var env: UnsafeMutablePointer<JNIEnv?> {
+    public var env: UnsafeMutablePointer<JNIEnv?> {
         UnsafeMutableRawPointer(block).assumingMemoryBound(to: JNIEnv?.self)
     }
 
-    static func from(_ env: UnsafeMutableRawPointer) -> JavaThread {
+    public static func from(_ env: UnsafeMutableRawPointer) -> JavaThread {
         let block = env.assumingMemoryBound(to: mead_jni_env_block.self)
         return Unmanaged<JavaThread>.fromOpaque(block.pointee.thread).takeUnretainedValue()
     }
@@ -187,6 +187,13 @@ public final class JavaThread {
             } catch {
                 raise(error)
             }
+            return
+        }
+        // A library loaded since the method was looked up may implement it.
+        if let native = runtime.boundNative(owner: method.owner.name, name: method.name, signature: method.signature) {
+            method.native = native
+            method.everRegistered = true
+            run(method, receiver: receiver, arguments: arguments, result: result)
             return
         }
         runtime.problemOnce("call of \(method.owner.name).\(method.name)\(method.signature), which is not implemented")
