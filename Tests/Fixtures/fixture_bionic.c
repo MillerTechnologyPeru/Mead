@@ -227,7 +227,16 @@ static int test_memory_and_jumps(void) {
     return 0;
 }
 
+// strerror_r under its own name is POSIX's, as code built without _GNU_SOURCE
+// (libc++, for one) calls it.
+extern int posix_strerror_r(int number, char *buffer, size_t size) __asm__("strerror_r");
+
 static int test_strings_and_files(void) {
+    char message[64];
+    CHECK(posix_strerror_r(ENOENT, message, sizeof(message)) == 0);
+    CHECK(strcmp(message, "No such file or directory") == 0);
+    CHECK(strcmp(strerror_r(ENOENT, message, sizeof(message)), "No such file or directory") == 0);
+
     char buffer[8];
     CHECK(strlcpy(buffer, "abcdefghij", sizeof(buffer)) == 10);
     CHECK(strcmp(buffer, "abcdefg") == 0);
