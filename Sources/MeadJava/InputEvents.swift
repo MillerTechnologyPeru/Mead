@@ -28,6 +28,8 @@ public final class JavaMotionEvent: JavaObject {
     public static let toolTypeMouse: Int32 = 3
     public static let sourceTouchscreen: Int32 = 0x1002
     public static let sourceMouse: Int32 = 0x2002
+    /// A captured pointer's: movement, not position.
+    public static let sourceMouseRelative: Int32 = 0x20004
 
     public struct Pointer {
         public let id: Int32
