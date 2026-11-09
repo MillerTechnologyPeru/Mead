@@ -29,3 +29,9 @@ RUN curl -fsSLo /tmp/tools.zip \
  && rm -rf /root/.android /tmp/tools.zip $ANDROID_HOME/.temp
 
 ENV MEAD_NDK=/opt/mead-ndk
+
+# SDL3 for windows and input: the library, and the headers its layouts are
+# checked against.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libsdl3-0 libsdl3-dev \
+ && rm -rf /var/lib/apt/lists/*
