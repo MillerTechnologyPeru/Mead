@@ -15,6 +15,8 @@ let package = Package(
         // Stand in for libEGL.so and the GLES libraries, and libvulkan.so.
         .library(name: "MeadEGL", type: .dynamic, targets: ["MeadEGL"]),
         .library(name: "MeadVulkan", type: .dynamic, targets: ["MeadVulkan"]),
+        // Stands in for libOpenSLES.so and libaaudio.so.
+        .library(name: "MeadOpenSLES", type: .dynamic, targets: ["MeadOpenSLES"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
@@ -73,6 +75,12 @@ let package = Package(
         // The host's graphics libraries, through what little needs changing.
         .target(name: "MeadEGL", dependencies: ["MeadInterface"]),
         .target(name: "MeadVulkan", dependencies: ["MeadInterface"]),
+        // Android's two audio APIs, on SDL3's audio.
+        .target(
+            name: "MeadOpenSLES",
+            dependencies: ["MeadInterface", "CMeadWindow"],
+            linkerSettings: [.linkedLibrary("m")]
+        ),
         .target(name: "CMeadAndroid", dependencies: ["CMeadJNI", "MeadInterface"]),
         .target(
             name: "MeadAndroid",
