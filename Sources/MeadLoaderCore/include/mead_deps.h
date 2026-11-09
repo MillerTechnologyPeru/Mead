@@ -71,6 +71,10 @@ void *mead_deps_provider_handle(const char *soname);
 // to call their startup and image hooks (mead_interface.h).
 void mead_deps_providers(void ***handles, const char ***files, size_t *count);
 
+// Has `callback` told of each provider opened from now on, for the startup
+// it missed by not having been needed until now.
+void mead_deps_set_provider_opened(void (*callback)(void *handle));
+
 // Writes where `name` would be beside the game's libraries into `path`, and
 // says whether a readable file is there.
 bool mead_deps_locate(const char *name, char *path, size_t size);
