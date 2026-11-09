@@ -1,5 +1,4 @@
 import Glibc
-import MeadInterface
 
 // The Swift side of the JNI function tables in CMeadJNI, entry by entry.
 // Every one starts by finding the thread from the JNIEnv it was given.
@@ -43,7 +42,8 @@ public func jni_FindClass(_ env: UnsafeMutableRawPointer, _ name: UnsafePointer<
 @_cdecl("mead_jni_GetSuperclass")
 public func jni_GetSuperclass(_ env: UnsafeMutableRawPointer, _ type: OpaquePointer?) -> OpaquePointer? {
     let current = thread(env)
-    return current.newLocal(classOf(type, in: current)?.superclass)
+    guard let definition = classOf(type, in: current), !definition.isInterface else { return nil }
+    return current.newLocal(definition.superclass)
 }
 
 @_cdecl("mead_jni_IsAssignableFrom")
@@ -706,9 +706,4 @@ public func JNI_CreateJavaVM(_ vm: UnsafeMutablePointer<UnsafeMutablePointer<Jav
 @_cdecl("JNI_GetDefaultJavaVMInitArgs")
 public func JNI_GetDefaultJavaVMInitArgs(_ arguments: UnsafeMutableRawPointer?) -> jint {
     jint(JNI_OK)
-}
-
-@_cdecl("mead_provider_startup")
-public func meadJNIProviderStartup(_ info: UnsafePointer<mead_startup_info>) {
-    JavaRuntime.shared.attachCurrentThread()
 }
