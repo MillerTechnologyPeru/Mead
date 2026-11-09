@@ -33,6 +33,8 @@ final class ActivityRunner {
     private let queue = InputQueue()
     private var pointerDown = false
     private var pointerDownTime: Int64 = 0
+    private var gamepads: [UInt32: SDL.Pointer] = [:]
+    private var gamepadAxes: [UInt32: [Int32: Float]] = [:]
 
     func requestFinish() {
         lock.withLock { finishRequested = true }
@@ -62,6 +64,9 @@ final class ActivityRunner {
             return 1
         }
         defer { SDL.quit() }
+        // Only for the gamepads, and a machine without their support can
+        // play without them.
+        _ = SDL.initialize(UInt32(MEAD_SDL_INIT_GAMEPAD))
 
         let width = environmentSize("MEAD_WINDOW_WIDTH", default: 1280)
         let height = environmentSize("MEAD_WINDOW_HEIGHT", default: 720)
@@ -164,10 +169,44 @@ final class ActivityRunner {
             let action: Int32 = type == MEAD_SDL_EVENT_FINGER_DOWN ? AMOTION_EVENT_ACTION_DOWN
                 : type == MEAD_SDL_EVENT_FINGER_UP ? AMOTION_EVENT_ACTION_UP : AMOTION_EVENT_ACTION_MOVE
             motion(action: action, x: finger.x * Float(window.width), y: finger.y * Float(window.height), time: time)
+        case MEAD_SDL_EVENT_GAMEPAD_ADDED:
+            let which = event.pointee.gdevice.which
+            if gamepads[which] == nil, let opened = SDL.openGamepad(which) {
+                gamepads[which] = opened
+            }
+        case MEAD_SDL_EVENT_GAMEPAD_REMOVED:
+            let which = event.pointee.gdevice.which
+            SDL.closeGamepad(gamepads.removeValue(forKey: which))
+            gamepadAxes[which] = nil
+        case MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN, MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP:
+            let button = event.pointee.gbutton
+            let code = androidKeyCode(forGamepadButton: button.button)
+            guard code != 0 else { break }
+            queue.enqueue(InputEvent(type: AINPUT_EVENT_TYPE_KEY, source: AINPUT_SOURCE_GAMEPAD,
+                                     action: button.down ? AKEY_EVENT_ACTION_DOWN : AKEY_EVENT_ACTION_UP,
+                                     eventTime: time, downTime: time, keyCode: code,
+                                     deviceId: gamepadDeviceId(button.which)))
+        case MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            // Android reports every axis in each event, so they are kept.
+            let motion = event.pointee.gaxis
+            var axes = gamepadAxes[motion.which] ?? [:]
+            for axis in androidAxes(forGamepadAxis: motion.axis) {
+                axes[axis] = androidAxisValue(motion.value)
+            }
+            gamepadAxes[motion.which] = axes
+            queue.enqueue(InputEvent(type: AINPUT_EVENT_TYPE_MOTION, source: AINPUT_SOURCE_JOYSTICK,
+                                     action: AMOTION_EVENT_ACTION_MOVE, eventTime: time, downTime: time,
+                                     x: axes[AMOTION_EVENT_AXIS_X] ?? 0, y: axes[AMOTION_EVENT_AXIS_Y] ?? 0,
+                                     axes: axes, deviceId: gamepadDeviceId(motion.which)))
         default:
             break
         }
         return true
+    }
+
+    /// Gamepads' device IDs, clear of the 1 the keyboard and touch use.
+    private func gamepadDeviceId(_ which: UInt32) -> Int32 {
+        Int32(truncatingIfNeeded: which) &+ 100
     }
 
     private func motion(action: Int32, x: Float, y: Float, time: Int64) {
@@ -213,6 +252,24 @@ public func meadAndroidInjectKey(_ scancode: UInt32, _ down: Bool) {
     event.key.type = UInt32(down ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
     event.key.scancode = scancode
     event.key.down = down
+    _ = SDL.pushEvent(&event)
+}
+
+@_cdecl("mead_android_inject_gamepad_button")
+public func meadAndroidInjectGamepadButton(_ button: UInt8, _ down: Bool) {
+    var event = mead_sdl_event()
+    event.gbutton.type = UInt32(down ? MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN : MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP)
+    event.gbutton.button = button
+    event.gbutton.down = down
+    _ = SDL.pushEvent(&event)
+}
+
+@_cdecl("mead_android_inject_gamepad_axis")
+public func meadAndroidInjectGamepadAxis(_ axis: UInt8, _ value: Int16) {
+    var event = mead_sdl_event()
+    event.gaxis.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION)
+    event.gaxis.axis = axis
+    event.gaxis.value = value
     _ = SDL.pushEvent(&event)
 }
 
