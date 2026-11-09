@@ -353,3 +353,125 @@ private final class InputRecorder {
     activity.unlockCursor()
     #expect(!JavaMinecraftActivity.cursorLocked)
 }
+
+// GameActivity's text input: the keyboard's edits on the game's text box.
+
+@Test func typingEditsTheTextAtTheCursor() {
+    JavaFramework.register()
+    let connection = JavaTextInputConnection()
+    connection.setState(JavaTextInputState(text: "My World", selectionStart: 2, selectionEnd: 2, composingRegionStart: -1, composingRegionEnd: -1))
+    var state = connection.apply(.insert(" New"))
+    #expect(state.text == "My New World" && state.selectionStart == 6 && state.selectionEnd == 6)
+    state = connection.apply(.deleteBackward)
+    #expect(state.text == "My Ne World" && state.selectionStart == 5)
+    state = connection.apply(.moveToEnd)
+    #expect(state.selectionStart == 11)
+    state = connection.apply(.deleteForward)
+    #expect(state.text == "My Ne World", "nothing after the end")
+    _ = connection.apply(.moveToStart)
+    state = connection.apply(.moveRight)
+    #expect(state.selectionStart == 1)
+    state = connection.apply(.deleteBackward)
+    #expect(state.text == "y Ne World")
+}
+
+@Test func aSelectionIsReplacedOrDeletedWhole() {
+    JavaFramework.register()
+    let connection = JavaTextInputConnection()
+    connection.setState(JavaTextInputState(text: "hello world", selectionStart: 6, selectionEnd: 11, composingRegionStart: -1, composingRegionEnd: -1))
+    #expect(connection.apply(.insert("there")).text == "hello there")
+    connection.setState(JavaTextInputState(text: "hello world", selectionStart: 11, selectionEnd: 5, composingRegionStart: -1, composingRegionEnd: -1))
+    let state = connection.apply(.deleteBackward)
+    #expect(state.text == "hello" && state.selectionStart == 5 && state.selectionEnd == 5)
+}
+
+@Test func positionsCountUTF16AndPairsGoTogether() {
+    JavaFramework.register()
+    let connection = JavaTextInputConnection()
+    connection.setState(JavaTextInputState(text: "", selectionStart: 0, selectionEnd: 0, composingRegionStart: -1, composingRegionEnd: -1))
+    var state = connection.apply(.insert("é🙂"))
+    #expect(state.selectionStart == 3, "é is one unit, the emoji two")
+    state = connection.apply(.moveLeft)
+    #expect(state.selectionStart == 1)
+    state = connection.apply(.deleteForward)
+    #expect(state.text == "é")
+}
+
+@Test func anOpenTextBoxTakesTypingAndLeavesOtherKeys() {
+    JavaFramework.register()
+    var edits: [TextEdit] = []
+    var keys: [Int32] = []
+    let input = GameActivityInput(sendMotion: { _ in }, sendKey: { keys.append($0.keyCode) }, editText: { edits.append($0) }, clock: { 0 })
+    func key(_ scancode: UInt32, _ typed: UInt32, down: Bool = true) {
+        var event = mead_sdl_event()
+        event.key.type = UInt32(down ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
+        event.key.scancode = scancode
+        event.key.key = typed
+        event.key.down = down
+        input.handle(event, windowWidth: 100, windowHeight: 100)
+    }
+    key(4, 0x61)
+    #expect(keys == [29] && edits.isEmpty, "with no text box, a letter is a key")
+    input.textInputActive = true
+    keys = []
+    key(4, 0x61)
+    key(42, 8)
+    key(42, 8, down: false)
+    key(80, 0)
+    key(40, 13)
+    key(41, 27)
+    #expect(edits == [.deleteBackward, .moveLeft], "letters come as text input, not as keys")
+    #expect(keys == [66, 111], "Enter and Escape stay keys")
+    "hi".withCString { text in
+        var event = mead_sdl_event()
+        event.text.type = UInt32(MEAD_SDL_EVENT_TEXT_INPUT)
+        event.text.text = text
+        input.handle(event, windowWidth: 100, windowHeight: 100)
+    }
+    #expect(edits.last == .insert("hi"))
+}
+
+// Minecraft's own text boxes: showKeyboard, and the whole text back.
+
+@Test func showKeyboardOpensTheBoxWithTheCaretAtTheEnd() {
+    JavaFramework.register()
+    let box = TextBox()
+    box.open(text: "My World", maxLength: 10)
+    #expect(box.isActive && box.current.start == 8)
+    box.apply(.moveToStart)
+    box.open(text: "My World", maxLength: 10)
+    #expect(box.current.start == 0, "opened again on the same text, the caret stays")
+    #expect(box.apply(.insert("abcdef")).text == "abMy World", "only as much as the limit allows")
+    box.setActive(false)
+    box.open(text: "Other")
+    #expect(box.current.text == "Other" && box.current.start == 5)
+}
+
+@Test func minecraftsKeyboardCallsDriveItsBox() {
+    JavaFramework.register()
+    let activity = JavaMinecraftActivity()
+    activity.showKeyboard("Seed", 32, false, false, false)
+    #expect(JavaMinecraftActivity.textBox.isActive && activity.getCaretPosition() == 4)
+    activity.setCaretPosition(1)
+    #expect(JavaMinecraftActivity.textBox.apply(.insert("x")).text == "Sxeed")
+    activity.hideKeyboard()
+    #expect(!JavaMinecraftActivity.textBox.isActive)
+}
+
+@Test func enterIsDoneWhenTheBoxTakesIt() {
+    JavaFramework.register()
+    var edits: [TextEdit] = []
+    var keys: [Int32] = []
+    let input = GameActivityInput(sendMotion: { _ in }, sendKey: { keys.append($0.keyCode) }, editText: { edits.append($0) }, clock: { 0 })
+    input.textInputActive = true
+    input.textInputTakesReturn = true
+    for down in [true, false] {
+        var event = mead_sdl_event()
+        event.key.type = UInt32(down ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
+        event.key.scancode = 40
+        event.key.key = 13
+        event.key.down = down
+        input.handle(event, windowWidth: 100, windowHeight: 100)
+    }
+    #expect(edits == [.submit] && keys.isEmpty)
+}
