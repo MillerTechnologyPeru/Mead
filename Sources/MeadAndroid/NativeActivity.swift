@@ -51,6 +51,12 @@ final class ActivityRunner {
             writeError("SDL3 (libSDL3.so.0) could not be loaded")
             return 1
         }
+        // Never flagged for OpenGL: SDL would make an EGL surface of its own
+        // on the window, and a window can only have one, which is the game's.
+        var windowFlags = MEAD_SDL_WINDOW_RESIZABLE
+        if Int(mead_graphics_api()) == MEAD_GRAPHICS_VULKAN {
+            windowFlags |= MEAD_SDL_WINDOW_VULKAN
+        }
         guard SDL.initialize(UInt32(MEAD_SDL_INIT_VIDEO) | UInt32(MEAD_SDL_INIT_EVENTS)) else {
             writeError("SDL_Init: \(SDL.lastError)")
             return 1
@@ -59,7 +65,7 @@ final class ActivityRunner {
 
         let width = environmentSize("MEAD_WINDOW_WIDTH", default: 1280)
         let height = environmentSize("MEAD_WINDOW_HEIGHT", default: 720)
-        guard let sdlWindow = SDL.createWindow(title, width, height, MEAD_SDL_WINDOW_RESIZABLE) else {
+        guard let sdlWindow = SDL.createWindow(title, width, height, windowFlags) else {
             writeError("SDL_CreateWindow: \(SDL.lastError)")
             return 1
         }
