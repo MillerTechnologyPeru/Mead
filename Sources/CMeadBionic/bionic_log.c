@@ -1,6 +1,9 @@
 #include "bionic_internal.h"
 
+#include <signal.h>
 #include <stdarg.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -11,6 +14,14 @@ enum { LOG_LINE = 4096 }; // about what Android's logger keeps of one message
 
 int bionic___android_log_write(int priority, const char *tag, const char *text) {
     mead_bionic_log_write(priority, tag, text);
+    // MEAD_LOG_STACK=text, with MEAD_CRASH_REPORT: the first few times a
+    // message holds that text, the frames of the code that wrote it.
+    static int stacks_left = 3;
+    const char *wanted = getenv("MEAD_LOG_STACK");
+    if (wanted && *wanted && text && stacks_left > 0 && strstr(text, wanted)) {
+        stacks_left--;
+        syscall(SYS_tgkill, getpid(), (pid_t)syscall(SYS_gettid), SIGUSR2);
+    }
     return 1;
 }
 
