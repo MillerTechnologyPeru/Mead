@@ -151,7 +151,7 @@ private nonisolated(unsafe) var callbackCalls = 0
     let runtime = JavaRuntime.shared
     for name in ["android/app/NativeActivity", "android/content/Context", "android/os/Build$VERSION",
                  "java/util/ArrayList", "java/util/HashMap", "java/util/UUID", "java/lang/System", "java/lang/Integer",
-                 "org/fmod/FMOD"] {
+                 "org/fmod/FMOD", "com/pairip/VMRunner"] {
         #expect(runtime.existingClass(named: name)?.isSynthesized == false, "\(name)")
     }
     let context = runtime.existingClass(named: "android/content/Context")!
