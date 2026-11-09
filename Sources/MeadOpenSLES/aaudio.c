@@ -43,7 +43,7 @@ enum {
 
     DEFAULT_RATE = 48000,
     DEFAULT_CHANNELS = 2,
-    BURST_FRAMES = 240,   // five milliseconds at 48 kHz
+    BURST_FRAMES = 240,   // five milliseconds at 48 kHz, when SDL can't say what its device takes
     CAPACITY_BURSTS = 8,
 };
 
@@ -89,6 +89,7 @@ typedef struct stream {
     int64_t frames_moved;
     void *scratch;
     int32_t scratch_frames;
+    int32_t burst;
 } stream;
 
 int32_t AAudio_createStreamBuilder(builder **out) {
@@ -214,8 +215,6 @@ int32_t AAudioStreamBuilder_openStream(builder *settings, stream **out) {
         self->settings.channels = DEFAULT_CHANNELS;
     if (self->settings.format == AAUDIO_UNSPECIFIED)
         self->settings.format = AAUDIO_FORMAT_PCM_FLOAT;
-    if (self->settings.capacity <= 0)
-        self->settings.capacity = BURST_FRAMES * CAPACITY_BURSTS;
     int format = sdl_format(self->settings.format);
     if (!format) {
         free(self);
@@ -224,25 +223,44 @@ int32_t AAudioStreamBuilder_openStream(builder *settings, stream **out) {
     self->audio = audio;
     self->state = AAUDIO_STREAM_STATE_OPEN;
     self->bytes_per_frame = bytes_per_sample(self->settings.format) * self->settings.channels;
-    self->buffer_size = self->settings.capacity;
-    self->scratch_frames = self->settings.callback_frames > BURST_FRAMES ? self->settings.callback_frames : BURST_FRAMES;
-    self->scratch = malloc((size_t)(self->scratch_frames * self->bytes_per_frame));
     pthread_mutex_init(&self->lock, NULL);
     pthread_cond_init(&self->changed, NULL);
 
     mead_sdl_audio_spec spec = { format, self->settings.channels, self->settings.rate };
     uint32_t device = self->settings.direction == AAUDIO_DIRECTION_INPUT ? MEAD_SDL_AUDIO_DEVICE_DEFAULT_RECORDING
                                                                          : MEAD_SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    // Paused until it is started, so nothing is asked of a callback before then.
     self->sdl = audio->open(device, &spec, self->settings.data ? callback_stream : NULL, self);
     if (!self->sdl) {
         fprintf(stderr, "mead: AAudio: %s\n", audio->error());
-        free(self->scratch);
+        pthread_cond_destroy(&self->changed);
+        pthread_mutex_destroy(&self->lock);
         free(self);
         return AAUDIO_ERROR_UNAVAILABLE;
     }
+
+    // A burst is what the device takes at a time, as on Android, where it is
+    // the mixer's period. Buffering a few of them lets a writer that is late
+    // by a period or two go unheard; buffering a few of anything smaller than
+    // what SDL's device takes does not.
+    self->burst = audio_device_frames(self->sdl, self->settings.rate);
+    if (self->burst <= 0)
+        self->burst = BURST_FRAMES;
+    if (self->settings.capacity <= 0)
+        self->settings.capacity = self->burst * CAPACITY_BURSTS;
+    self->buffer_size = self->settings.capacity;
+    self->scratch_frames = self->settings.callback_frames > self->burst ? self->settings.callback_frames : self->burst;
+    self->scratch = malloc((size_t)(self->scratch_frames * self->bytes_per_frame));
+    if (!self->scratch) {
+        audio->destroy(self->sdl);
+        pthread_cond_destroy(&self->changed);
+        pthread_mutex_destroy(&self->lock);
+        free(self);
+        return AAUDIO_ERROR_NO_MEMORY;
+    }
     TRACE("open %p: %s, %d Hz, %d channels, format %d, capacity %d, burst %d, callback %s, %d frames per callback, performance %d",
           (void *)self, self->settings.direction == AAUDIO_DIRECTION_INPUT ? "input" : "output", self->settings.rate,
-          self->settings.channels, self->settings.format, self->settings.capacity, BURST_FRAMES,
+          self->settings.channels, self->settings.format, self->settings.capacity, self->burst,
           self->settings.data ? "yes" : "no", self->settings.callback_frames, self->settings.performance);
     *out = self;
     return AAUDIO_OK;
@@ -380,7 +398,7 @@ int32_t AAudioStream_setBufferSizeInFrames(stream *self, int32_t frames) {
 
 GETTER(getBufferSizeInFrames, self->buffer_size)
 GETTER(getBufferCapacityInFrames, self->settings.capacity)
-GETTER(getFramesPerBurst, BURST_FRAMES)
+GETTER(getFramesPerBurst, self->burst)
 GETTER(getFramesPerDataCallback, self->settings.callback_frames)
 GETTER(getXRunCount, 0)
 GETTER(getSampleRate, self->settings.rate)
@@ -400,16 +418,34 @@ static int64_t frames_moved(stream *self) {
     return frames;
 }
 
+// Frames in SDL's stream between the app and the device: written by the
+// app and not yet taken by the device, for output; taken from the device and
+// not yet read by the app, for input.
+static int64_t frames_waiting(stream *self) {
+    int bytes = self->settings.direction == AAUDIO_DIRECTION_INPUT ? self->audio->available(self->sdl)
+                                                                    : self->audio->queued(self->sdl);
+    return bytes > 0 ? bytes / self->bytes_per_frame : 0;
+}
+
+// As on Android: frames written by whichever side writes, the app for output
+// and the device for input, and read by the other.
 int64_t AAudioStream_getFramesWritten(stream *self) {
-    return frames_moved(self);
+    int64_t moved = frames_moved(self);
+    return self->settings.direction == AAUDIO_DIRECTION_INPUT ? moved + frames_waiting(self) : moved;
 }
 
 int64_t AAudioStream_getFramesRead(stream *self) {
-    return frames_moved(self);
+    int64_t moved = frames_moved(self);
+    if (self->settings.direction == AAUDIO_DIRECTION_INPUT)
+        return moved;
+    int64_t read = moved - frames_waiting(self);
+    return read > 0 ? read : 0;
 }
 
+// The frame at the device now: what it has taken, either way.
 int32_t AAudioStream_getTimestamp(stream *self, clockid_t clock, int64_t *position, int64_t *time) {
-    *position = frames_moved(self);
+    *position = self->settings.direction == AAUDIO_DIRECTION_INPUT ? AAudioStream_getFramesWritten(self)
+                                                                   : AAudioStream_getFramesRead(self);
     *time = now_nanoseconds(clock);
     return AAUDIO_OK;
 }
