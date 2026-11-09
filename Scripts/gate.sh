@@ -31,8 +31,33 @@ SDL_VIDEODRIVER=dummy MEAD_DATA_DIR=$fixtures/app timeout 60 "$bin/mead" $fixtur
 echo "a native_app_glue app ran from window to exit"
 
 # Rendering, for real, in Mesa's software drivers on a virtual X server.
-for app in gles vulkan; do
+run_app() {
     SDL_VIDEODRIVER=x11 LIBGL_ALWAYS_SOFTWARE=1 MEAD_DATA_DIR=$fixtures/app \
-        timeout 120 xvfb-run -a -s "-screen 0 1280x800x24" "$bin/mead" $fixtures/libfixture_$app.so
+        timeout 120 xvfb-run -a -s "-screen 0 1280x800x24" "$bin/mead" "$@"
+}
+
+for app in gles vulkan; do
+    run_app $fixtures/libfixture_$app.so
     echo "the $app app rendered and read back the right pixels"
+    MEAD_GRAPHICS_API=$app run_app $fixtures/libfixture_$app.so
+    echo "the $app app rendered with MEAD_GRAPHICS_API=$app"
+    run_app --graphics-api $app $fixtures/libfixture_$app.so
+    echo "--graphics-api $app does the same"
 done
+
+# Choosing one API has the other look absent, as games probe for it.
+if ! MEAD_GRAPHICS_API=gles run_app $fixtures/libfixture_vulkan.so 2>&1 | grep -q "vkCreateInstance.*: -9"; then
+    echo "choosing GLES did not hide Vulkan" >&2
+    exit 1
+fi
+echo "choosing GLES hides Vulkan"
+if ! MEAD_GRAPHICS_API=vulkan run_app $fixtures/libfixture_gles.so 2>&1 | grep -q "display != EGL_NO_DISPLAY"; then
+    echo "choosing Vulkan did not hide GLES" >&2
+    exit 1
+fi
+echo "choosing Vulkan hides GLES"
+if "$bin/mead" --graphics-api metal $fixtures/libfixture_gles.so 2>/dev/null; then
+    echo "an unknown graphics API was accepted" >&2
+    exit 1
+fi
+echo "an unknown graphics API is refused"
