@@ -71,7 +71,11 @@ public func jni_IsInstanceOf(_ env: UnsafeMutableRawPointer, _ object: OpaquePoi
 
 @_cdecl("mead_jni_FromReflectedMethod")
 public func jni_FromReflectedMethod(_ env: UnsafeMutableRawPointer, _ member: OpaquePointer?) -> OpaquePointer? {
-    (thread(env).resolve(member) as? JavaReflectedMember)?.method?.id
+    switch thread(env).resolve(member) {
+    case let reflected as JavaReflectedMethod: return reflected.method.id
+    case let reflected as JavaReflectedMember: return reflected.method?.id
+    default: return nil
+    }
 }
 
 @_cdecl("mead_jni_FromReflectedField")
