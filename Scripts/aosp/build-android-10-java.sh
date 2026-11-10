@@ -43,4 +43,17 @@ cp system/timezone/output_data/iana/tzdata \
 # Conscrypt's CA certificates, from $ANDROID_ROOT/etc/security/cacerts.
 mkdir -p "$out/etc/security/cacerts"
 cp system/ca-certificates/files/* "$out/etc/security/cacerts/"
+# The system fonts, from $ANDROID_ROOT/fonts with their list in
+# $ANDROID_ROOT/etc/fonts.xml (Android's /system/fonts and
+# /system/etc/fonts.xml): every font the list names.
+mkdir -p "$out/fonts"
+cp frameworks/base/data/fonts/fonts.xml "$out/etc/"
+# A font's file name follows its <font> tag, before the font's end or its
+# variable axes.
+for font in $(grep -oE '>[[:space:]]*[^<>[:space:]]+\.(ttf|ttc|otf)' frameworks/base/data/fonts/fonts.xml | tr -d '> ' | sort -u); do
+    found=$(find external/roboto-fonts external/noto-fonts external/google-fonts external/naver-fonts \
+                 frameworks/base/data/fonts -name "$font" | head -1)
+    [ -n "$found" ] || { echo "no font $font" >&2; exit 1; }
+    cp "$found" "$out/fonts/"
+done
 ls -lR "$out"
