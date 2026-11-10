@@ -121,6 +121,7 @@ public final class JavaRuntime {
             defineClass(for: JavaDirectBuffer.self)
             defineClass(for: JavaReflectedMember.self)
             defineClass(for: JavaReflectedMethod.self)
+            defineClass(for: JavaReflectedField.self)
             for (name, parent) in standardExceptions {
                 defineStandardClass(name, parent: parent)
             }

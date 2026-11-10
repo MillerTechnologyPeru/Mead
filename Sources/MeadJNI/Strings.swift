@@ -18,6 +18,26 @@ public final class JavaString: JavaObject {
         self.init(units: [])
     }
 
+    /// new String(bytes): text in UTF-8, Android's default.
+    @JavaMethod(signature: "([B)V") public convenience init(bytes: JavaObject?) {
+        self.init(units: Self.decode(bytes, charset: nil))
+    }
+
+    /// new String(bytes, charset), how native code makes a string that isn't
+    /// modified UTF-8.
+    @JavaMethod(signature: "([BLjava/lang/String;)V") public convenience init(bytes: JavaObject?, charset: String?) {
+        self.init(units: Self.decode(bytes, charset: charset))
+    }
+
+    private static func decode(_ array: JavaObject?, charset: String?) -> [UInt16] {
+        guard let array = array as? JavaPrimitiveArray else { return [] }
+        let bytes = UnsafeRawBufferPointer(start: array.storage, count: array.count)
+        switch charset?.uppercased() {
+        case "ISO-8859-1", "ISO8859_1", "LATIN1", "US-ASCII", "ASCII": return bytes.map(UInt16.init)
+        default: return Array(String(decoding: bytes, as: UTF8.self).utf16)
+        }
+    }
+
     public var swiftValue: String {
         String(decoding: units, as: UTF16.self)
     }

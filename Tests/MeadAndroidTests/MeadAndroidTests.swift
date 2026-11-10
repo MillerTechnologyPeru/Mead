@@ -548,6 +548,104 @@ nonisolated(unsafe) private var framesSeen: [Int64] = []
     #expect(framesSeen.count == 1, "a callback runs once")
 }
 
+@Test func unitysPlayerOffersTheActivityAndLoadsPlugins() {
+    UnityFramework.register()
+    let activity = JavaUnityPlayerActivity()
+    let player = JavaUnityPlayerForActivityOrService(activity: activity)
+    #expect(JavaUnityPlayer.currentActivity === activity)
+    #expect(!player.loadLibrary("mead-no-such-library"))
+    #expect(!player.loadLibrary(nil))
+}
+
+@Test func aStringCanBeMadeFromBytes() {
+    JavaFramework.register()
+    let bytes = JavaRuntime.shared.newByteArray([0xc3, 0xa9, 0x41])
+    #expect(JavaString(bytes: bytes, charset: "UTF-8").swiftValue == "\u{e9}A")
+    #expect(JavaString(bytes: bytes, charset: "ISO-8859-1").units == [0xc3, 0xa9, 0x41])
+    #expect(JavaString(bytes: bytes).swiftValue == "\u{e9}A")
+    #expect(JavaRuntime.shared.findClassPublic(named: "java/lang/String")?
+        .findMethod(MemberKey(name: "<init>", signature: "([BLjava/lang/String;)V"))?.constructor != nil)
+}
+
+@Test func unitysReflectionFindsFieldsByNameAlone() {
+    UnityFramework.register()
+    let player = JavaRuntime.shared.findClassPublic(named: "com/unity3d/player/UnityPlayer")!
+    let field = JavaUnityReflectionHelper.getFieldID(player, "currentActivity", "", true)
+    #expect(field?.field.name == "currentActivity")
+    #expect(JavaUnityReflectionHelper.getFieldSignature(field) == "Landroid/app/Activity;")
+    #expect(JavaUnityReflectionHelper.getFieldID(player, "meadNoSuchField", "", true) == nil)
+    let method = JavaUnityReflectionHelper.getMethodID(player, "getContext", "()Landroid/content/Context;", false)
+    #expect(method?.getName() == "getContext" && method?.method.isSynthesized == false)
+    #expect(JavaUnityReflectionHelper.getConstructorID(JavaRuntime.shared.findClassPublic(named: "java/lang/String"), "()V")?.method.constructor != nil)
+}
+
+@Test func aFieldAskedForAsAnObjectIsTheRealOne() {
+    UnityFramework.register()
+    let player = JavaRuntime.shared.findClassPublic(named: "com/unity3d/player/UnityPlayer")!
+    #expect(player.field(named: "currentActivity", signature: "Ljava/lang/Object;", isStatic: true)?.isSynthesized == false)
+    #expect(player.field(named: "meadNoSuchObject", signature: "Ljava/lang/Object;", isStatic: true)?.isSynthesized == true)
+}
+
+@Test func unitysReflectionFindsTheClosestMethod() {
+    UnityFramework.register()
+    let activity = JavaRuntime.shared.findClassPublic(named: "com/unity3d/player/UnityPlayerActivity")!
+    // C# knows the result only as some object.
+    let found = JavaUnityReflectionHelper.getMethodID(activity, "getSharedPreferences", "(Ljava/lang/String;I)Ljava/lang/Object;", false)
+    #expect(found?.method.signature == "(Ljava/lang/String;I)Landroid/content/SharedPreferences;")
+    // A primitive that differs is another method altogether.
+    let missing = JavaUnityReflectionHelper.getMethodID(activity, "getSharedPreferences", "(Ljava/lang/String;J)Ljava/lang/Object;", false)
+    #expect(missing?.method.isSynthesized == true)
+}
+
+@Test func playBillingSaysItIsUnavailable() {
+    UnityFramework.register()
+    let client = JavaBillingClient.newBuilder(nil)?.enablePendingPurchases()?.setListener(nil)?.build()
+    #expect(client?.isReady() == false && client?.getConnectionState() == 0)
+    #expect(client?.isFeatureSupported("subscriptions")?.getResponseCode() == 3)
+    #expect(client?.launchBillingFlow(nil, nil)?.getResponseCode() == 3)
+    let codes = LockedValue([Int32]())
+    let listener = JavaProxy(interfaces: [JavaRuntime.shared.findClassPublic(named: "com/android/billingclient/api/BillingClientStateListener")!]) { thread, method, arguments in
+        if method.name == "onBillingSetupFinished", let result = thread.resolve(arguments![0].l) as? JavaBillingResult {
+            codes.withLock { $0.append(result.getResponseCode()) }
+        }
+        return jvalue()
+    }
+    client?.startConnection(listener)
+    JavaLooper.main.runDue()
+    #expect(codes.withLock { $0 } == [3])
+    // What Unity's C# looks up, knowing only that it wants some object.
+    let billing = JavaRuntime.shared.findClassPublic(named: "com/android/billingclient/api/BillingClient")!
+    #expect(JavaUnityReflectionHelper.getMethodID(billing, "newBuilder", "(Lcom.unity3d.player.UnityPlayerActivity;)Ljava/lang/Object;", true)?.method.isSynthesized == false)
+}
+
+@Test func playGamesSaysNobodyIsSignedIn() {
+    UnityFramework.register()
+    let client = JavaPlayGames.getGamesSignInClient(nil)
+    let answers = LockedValue([Bool]())
+    let listener = JavaProxy(interfaces: [JavaRuntime.shared.findClassPublic(named: "com/google/android/gms/tasks/OnSuccessListener")!]) { thread, _, arguments in
+        if let result = thread.resolve(arguments![0].l) as? JavaAuthenticationResult {
+            answers.withLock { $0.append(result.isAuthenticated()) }
+        }
+        return jvalue()
+    }
+    _ = client?.isAuthenticated()?.addOnSuccessListener(listener)?.addOnFailureListener(nil)
+    _ = client?.signIn()?.addOnSuccessListener(listener)
+    JavaLooper.main.runDue()
+    #expect(answers.withLock { $0 } == [false, false])
+    let games = JavaRuntime.shared.findClassPublic(named: "com/google/android/gms/games/PlayGames")!
+    #expect(JavaUnityReflectionHelper.getMethodID(games, "getGamesSignInClient", "(Lcom.unity3d.player.UnityPlayerActivity;)Ljava/lang/Object;", true)?.method.isSynthesized == false)
+}
+
+@Test func aNativeMethodIsKnownOnceRegistered() {
+    UnityFramework.register()
+    let type = JavaRuntime.shared.findClassPublic(named: "com/unity3d/player/UnityPlayer")!
+    let method = type.method(named: "meadTestNative", signature: "(I)V", isStatic: false)
+    #expect(!type.hasNativeMethod(named: "meadTestNative", signature: "(I)V"))
+    method?.everRegistered = true
+    #expect(type.hasNativeMethod(named: "meadTestNative", signature: "(I)V"))
+    #expect(!type.hasNativeMethod(named: "meadTestNative", signature: "(J)V"))
+}
+
 @Test func classForNameTakesJavasDottedNames() {
     UnityFramework.register()
     let thread = JavaRuntime.shared.attachCurrentThread()
@@ -715,6 +813,25 @@ nonisolated(unsafe) private var framesSeen: [Int64] = []
     #expect(JavaWindowManager().getMaximumWindowMetrics()?.getBounds()?.height() == 768)
     #expect(JavaUnityPlayerActivity().getSystemService("audio") is JavaAudioManager)
     #expect(JavaAudioManager().getProperty(JavaAudioManager.outputSampleRate) == "48000")
+}
+
+@Test func aFileCanBeMadeInADirectoryAndWritten() throws {
+    JavaFramework.register()
+    let directory = JavaFile(path: "/tmp")
+    let file = JavaFile(parent: directory, child: "mead-output-\(getpid())")
+    #expect(file.path == "/tmp/mead-output-\(getpid())")
+    #expect(JavaFile(parentPath: "/tmp/", child: "a").path == "/tmp/a")
+    defer { _ = file.delete() }
+    let output = try JavaFileOutputStream(file: file)
+    try output.write(JavaRuntime.shared.newByteArray([1, 2, 3, 4]), 1, 2)
+    output.close()
+    var status = stat()
+    #expect(stat(file.path, &status) == 0 && status.st_size == 2)
+    #expect(file.setReadOnly())
+    stat(file.path, &status)
+    #expect(status.st_mode & mode_t(S_IWUSR) == 0)
+    #expect(file.setWritable(true))
+    #expect(throws: (any Error).self) { try output.write(JavaRuntime.shared.newByteArray([1])) }
 }
 
 @Test func aFileKnowsItsParentAndName() {

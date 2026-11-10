@@ -32,6 +32,9 @@ void bionic_rewind(FILE *file) { rewind(bionic_file(file)); }
 int bionic_fgetc(FILE *file) { return fgetc(bionic_file(file)); }
 int bionic_getc(FILE *file) { return getc(bionic_file(file)); }
 int bionic_fputc(int c, FILE *file) { return fputc(c, bionic_file(file)); }
+wint_t bionic_getwc(FILE *file) { return getwc(bionic_file(file)); }
+wint_t bionic_fputwc(wchar_t c, FILE *file) { return fputwc(c, bionic_file(file)); }
+wint_t bionic_ungetwc(wint_t c, FILE *file) { return ungetwc(c, bionic_file(file)); }
 int bionic_putc(int c, FILE *file) { return putc(c, bionic_file(file)); }
 int bionic_ungetc(int c, FILE *file) { return ungetc(c, bionic_file(file)); }
 int bionic_fputs(const char *text, FILE *file) { return fputs(text, bionic_file(file)); }

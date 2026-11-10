@@ -13,7 +13,8 @@ import MeadWindow
 /// 1. System.load(libmain.so), whose JNI_OnLoad registers NativeLoader;
 ///    NativeLoader.load(<library directory>) then loads libunity.so, whose
 ///    JNI_OnLoad registers the player's natives.
-/// 2. initJni(activity, 0, ""): 0 is the "activity or service" kind.
+/// 2. initJni(activity, 0, ""), or initJni(activity, 0) before Unity 6.3: 0 is
+///    the "activity or service" kind.
 /// 3. On Unity's main thread: nativeRecreateGfxState(0, surface),
 ///    nativeSendSurfaceChangedEvent(), nativeResume(), nativeFocusChanged(true).
 /// 4. Each frame: the main thread's jobs, then nativeRender() until it says
@@ -87,11 +88,19 @@ final class UnityRunner {
         context.l = thread.newLocal(activity)
         var kind = jvalue()
         kind.i = 0
-        var commandLine = jvalue()
-        commandLine.l = thread.newLocal(JavaString(""))
+        // Unity 6.3 added initJni's command line and nativeInjectEvent's
+        // display; the natives registered say which this game has.
+        let playerClass = JavaRuntime.shared.existingClass(named: Self.player)
         JavaRuntime.shared.trace("UnityPlayer.initJni")
-        thread.call(Self.player, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V", on: player,
-                    [context, kind, commandLine])
+        if playerClass?.hasNativeMethod(named: "initJni", signature: "(Landroid/content/Context;ILjava/lang/String;)V") == true {
+            var commandLine = jvalue()
+            commandLine.l = thread.newLocal(JavaString(""))
+            thread.call(Self.player, "initJni", "(Landroid/content/Context;ILjava/lang/String;)V", on: player,
+                        [context, kind, commandLine])
+        } else {
+            thread.call(Self.player, "initJni", "(Landroid/content/Context;I)V", on: player, [context, kind])
+        }
+        let injectTakesDisplay = playerClass?.hasNativeMethod(named: "nativeInjectEvent", signature: "(Landroid/view/InputEvent;I)Z") == true
 
         func native(_ name: String, _ signature: String = "()V", _ arguments: [jvalue] = []) -> jvalue {
             JavaRuntime.shared.trace("UnityPlayer.\(name)")
@@ -118,9 +127,13 @@ final class UnityRunner {
             defer { thread.popFrame() }
             var value = jvalue()
             value.l = thread.newLocal(event)
-            var display = jvalue()
-            display.i = 0
-            thread.call(Self.player, "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z", on: player, [value, display])
+            if injectTakesDisplay {
+                var display = jvalue()
+                display.i = 0
+                thread.call(Self.player, "nativeInjectEvent", "(Landroid/view/InputEvent;I)Z", on: player, [value, display])
+            } else {
+                thread.call(Self.player, "nativeInjectEvent", "(Landroid/view/InputEvent;)Z", on: player, [value])
+            }
         }
         let input = GameActivityInput(sendMotion: inject, sendKey: inject)
         input.mouseIsFinger = true

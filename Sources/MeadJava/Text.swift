@@ -113,6 +113,56 @@ open class JavaInputStream: JavaObject {
     @JavaMethod("close") public func close() {}
 }
 
+/// java.io.FileOutputStream: a file written from the start.
+@JavaClass("java/io/FileOutputStream")
+public final class JavaFileOutputStream: JavaObject {
+    private var file: UnsafeMutablePointer<FILE>?
+
+    private init(opening path: String) throws {
+        guard let opened = fopen(path, "w") else {
+            throw JavaException("java/io/FileNotFoundException", path)
+        }
+        file = opened
+        super.init()
+    }
+
+    @JavaMethod(signature: "(Ljava/io/File;)V") public convenience init(file: JavaObject?) throws {
+        try self.init(opening: (file as? JavaFile)?.path ?? "")
+    }
+
+    @JavaMethod(signature: "(Ljava/lang/String;)V") public convenience init(path: String?) throws {
+        try self.init(opening: path ?? "")
+    }
+
+    deinit { close() }
+
+    @JavaMethod("write", signature: "([BII)V") public func write(_ array: JavaObject?, _ offset: Int32, _ length: Int32) throws {
+        guard let array = array as? JavaPrimitiveArray else {
+            throw JavaException("java/lang/NullPointerException", "write(null)")
+        }
+        guard offset >= 0, length >= 0, Int(offset) + Int(length) <= array.count else {
+            throw JavaException("java/lang/IndexOutOfBoundsException", "offset \(offset), length \(length), size \(array.count)")
+        }
+        guard let file else { throw JavaException("java/io/IOException", "Stream Closed") }
+        guard fwrite(array.storage + Int(offset), 1, Int(length), file) == Int(length) else {
+            throw JavaException("java/io/IOException", "write failed")
+        }
+    }
+
+    @JavaMethod("write", signature: "([B)V") public func write(_ array: JavaObject?) throws {
+        try write(array, 0, Int32((array as? JavaPrimitiveArray)?.count ?? 0))
+    }
+
+    @JavaMethod("flush") public func flush() {
+        if let file { fflush(file) }
+    }
+
+    @JavaMethod("close") public func close() {
+        if let file { fclose(file) }
+        file = nil
+    }
+}
+
 /// AssetManager.open's stream.
 @JavaClass("android/content/res/AssetManager$AssetInputStream")
 public final class JavaAssetInputStream: JavaInputStream {}
