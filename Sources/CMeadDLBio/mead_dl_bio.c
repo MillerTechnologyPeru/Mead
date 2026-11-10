@@ -18,6 +18,34 @@ void mead_dl_bio_install(const mead_dl_bio_loader *loader) {
     mead_loader = *loader;
 }
 
+void mead_dl_bio_install_functions(void *(*open)(const char *name, int flags),
+                                   void *(*sym)(void *handle, const char *name, const void *caller),
+                                   int (*close)(void *handle), const char *(*error)(void)) {
+    mead_loader = (mead_dl_bio_loader){ .open = open, .sym = sym, .close = close, .error = error };
+}
+
+// Directories for libraries asked for by name, set up before ART starts.
+enum { SEARCH_DIRECTORIES = 8 };
+static char *search_directories[SEARCH_DIRECTORIES];
+static size_t search_directory_count;
+
+void mead_dl_bio_add_search_directory(const char *directory) {
+    if (search_directory_count < SEARCH_DIRECTORIES)
+        search_directories[search_directory_count++] = strdup(directory);
+}
+
+// A library asked for by name, from the search directories first.
+static void *open_by_name(const char *name, int flag) {
+    for (size_t index = 0; index < search_directory_count; index++) {
+        char path[4096];
+        if (snprintf(path, sizeof(path), "%s/%s", search_directories[index], name) >= (int)sizeof(path))
+            continue;
+        if (access(path, F_OK) == 0)
+            return dlopen(path, flag);
+    }
+    return dlopen(name, flag);
+}
+
 // A handle remembers which linker opened it.
 typedef struct handle {
     bool host;
@@ -100,7 +128,7 @@ void *bionic_dlopen(const char *filename, int flag) {
     bool host = filename == NULL || !strchr(filename, '/') || !mead_dl_bio_is_bionic_library(filename);
     void *opened = NULL;
     if (host) {
-        opened = dlopen(filename, flag);
+        opened = filename && !strchr(filename, '/') ? open_by_name(filename, flag) : dlopen(filename, flag);
         if (!opened && filename && !strchr(filename, '/') && mead_loader.open) {
             dlerror();
             host = false;
