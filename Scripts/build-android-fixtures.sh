@@ -61,6 +61,8 @@ $common -O2 -D_FORTIFY_SOURCE=2 -shared -Wl,-soname,libfixture_bionic.so \
 # entry points are left for libart.so's provider to answer.
 $common -O1 -shared -Wl,-soname,libfixture_jni.so -o $out/libfixture_jni.so \
     Tests/Fixtures/fixture_jni.c
+$common -shared -Wl,-soname,libfixture_art.so -o $out/libfixture_art.so \
+    Tests/Fixtures/fixture_art.c
 
 # A real native_app_glue app, its assets, and the library it loads by name.
 mkdir -p $out/app/assets/sub
