@@ -265,6 +265,23 @@ public final class JavaClass: JavaObject {
         }
     }
 
+    /// Whether a native library has registered this method: how a caller
+    /// tells which version of a library it has, when natives change shape.
+    public func hasNativeMethod(named name: String, signature: String) -> Bool {
+        findMethod(MemberKey(name: name, signature: signature))?.everRegistered == true
+    }
+
+    private func realObjectField(named name: String, isStatic: Bool) -> JavaField? {
+        var current: JavaClass? = self
+        while let at = current {
+            if let match = at.fields.values.first(where: { $0.name == name && $0.isStatic == isStatic && !$0.isSynthesized && $0.isReference }) {
+                return match
+            }
+            current = at.superclass
+        }
+        return nil
+    }
+
     func findField(_ key: MemberKey) -> JavaField? {
         JavaRuntime.shared.lock.withLock {
             var current: JavaClass? = self
@@ -332,6 +349,10 @@ public final class JavaClass: JavaObject {
             let key = MemberKey(name: name, signature: signature)
             if let found = findField(key), found.isStatic == isStatic {
                 return found
+            }
+            // Unity's C# knows a field it gets as an object only as Object.
+            if signature == "Ljava/lang/Object;", let real = realObjectField(named: name, isStatic: isStatic) {
+                return real
             }
             runtime.problemOnce("field \(self.name).\(name) \(signature) is not implemented")
             let field = JavaField(name: name, signature: signature, isStatic: isStatic, owner: self, isSynthesized: true)
