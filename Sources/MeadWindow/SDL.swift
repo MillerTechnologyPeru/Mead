@@ -24,6 +24,13 @@ public enum SDL {
     public nonisolated(unsafe) static var openGamepad: (@convention(c) (UInt32) -> Pointer?)!
     public nonisolated(unsafe) static var closeGamepad: (@convention(c) (Pointer?) -> Void)!
     public nonisolated(unsafe) static var pushEvent: (@convention(c) (EventPointer?) -> Bool)!
+    public nonisolated(unsafe) static var pumpEvents: (@convention(c) () -> Void)!
+    public nonisolated(unsafe) static var getWindowSurface: (@convention(c) (Pointer?) -> UnsafeMutablePointer<mead_sdl_surface>?)!
+    public nonisolated(unsafe) static var updateWindowSurface: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var convertPixels: (@convention(c) (Int32, Int32, UInt32, UnsafeRawPointer?, Int32, UInt32, Pointer?, Int32) -> Bool)!
+    public nonisolated(unsafe) static var getPrimaryDisplay: (@convention(c) () -> UInt32)!
+    public nonisolated(unsafe) static var getCurrentDisplayMode: (@convention(c) (UInt32) -> UnsafePointer<mead_sdl_display_mode>?)!
+    public nonisolated(unsafe) static var getDisplayContentScale: (@convention(c) (UInt32) -> Float)!
 
     public static var lastError: String {
         getError?().map { String(cString: $0) } ?? "SDL is not loaded"
@@ -65,6 +72,13 @@ public enum SDL {
         openGamepad = bind("SDL_OpenGamepad")
         closeGamepad = bind("SDL_CloseGamepad")
         pushEvent = bind("SDL_PushEvent")
+        pumpEvents = bind("SDL_PumpEvents")
+        getWindowSurface = bind("SDL_GetWindowSurface")
+        updateWindowSurface = bind("SDL_UpdateWindowSurface")
+        convertPixels = bind("SDL_ConvertPixels")
+        getPrimaryDisplay = bind("SDL_GetPrimaryDisplay")
+        getCurrentDisplayMode = bind("SDL_GetCurrentDisplayMode")
+        getDisplayContentScale = bind("SDL_GetDisplayContentScale")
         return complete
     }
 }
