@@ -26,6 +26,15 @@ typedef struct mead_dl_bio_loader {
 
 void mead_dl_bio_install(const mead_dl_bio_loader *loader);
 
+// The same, as four functions, for callers that can't build the struct.
+void mead_dl_bio_install_functions(void *(*open)(const char *name, int flags),
+                                   void *(*sym)(void *handle, const char *name, const void *caller),
+                                   int (*close)(void *handle), const char *(*error)(void));
+
+// Adds a directory to look in for libraries asked for by name alone, before
+// the system's search path: ART asks for its own (libjavacore.so) that way.
+void mead_dl_bio_add_search_directory(const char *directory);
+
 // Whether the ELF library at `path` was built for bionic: it needs libc.so,
 // where everything built for glibc needs libc.so.6 or is glibc itself. False
 // if it can't be read.
