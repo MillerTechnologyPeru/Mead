@@ -15,7 +15,7 @@ export ALLOW_MISSING_DEPENDENCIES=true
 set +u
 source build/envsetup.sh
 lunch aosp_arm64-eng
-m -j"${JOBS:-4}" $modules
+m -j"${JOBS:-4}" $modules framework-res
 set -u
 
 out=out/mead-java
@@ -28,6 +28,9 @@ for module in $modules; do
     [ -n "$jar" ] || { echo "no jar for $module" >&2; exit 1; }
     cp "$jar" "$out/$module.jar"
 done
+# The framework's own resources (android.R), which every app's Resources
+# sits on.
+cp out/target/product/generic_arm64/system/framework/framework-res.apk "$out/"
 
 # The data the core library reads, from $ANDROID_RUNTIME_ROOT/etc and
 # $ANDROID_TZDATA_ROOT/etc: ICU4J's data (ICU 63) and the time zones.
