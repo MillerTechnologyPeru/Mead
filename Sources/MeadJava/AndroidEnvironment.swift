@@ -108,6 +108,7 @@ public enum JavaFramework {
         runtime.defineInterface("java/lang/Iterable")
         runtime.defineInterface("java/util/Collection", extending: ["java/lang/Iterable"], methods: [
             ("size", "()I"), ("isEmpty", "()Z"), ("add", "(Ljava/lang/Object;)Z"), ("clear", "()V"),
+            ("iterator", "()Ljava/util/Iterator;"),
         ])
         runtime.defineInterface("java/util/List", extending: ["java/util/Collection"], methods: [
             ("get", "(I)Ljava/lang/Object;"), ("set", "(ILjava/lang/Object;)Ljava/lang/Object;"), ("remove", "(I)Ljava/lang/Object;"),
@@ -128,6 +129,9 @@ public enum JavaFramework {
 
         runtime.defineInterface("android/os/Handler$Callback", methods: [("handleMessage", "(Landroid/os/Message;)Z")])
         runtime.defineInterface("android/view/Choreographer$FrameCallback", methods: [("doFrame", "(J)V")])
+        runtime.defineInterface("android/hardware/input/InputManager$InputDeviceListener", methods: [
+            ("onInputDeviceAdded", "(I)V"), ("onInputDeviceRemoved", "(I)V"), ("onInputDeviceChanged", "(I)V"),
+        ])
 
         runtime.defineInterface("java/security/Key")
         runtime.defineInterface("java/security/PublicKey", extending: ["java/security/Key"])
@@ -148,7 +152,7 @@ public enum JavaFramework {
             JavaLooper.self, JavaMessage.self, JavaHandler.self, JavaHandlerThread.self, JavaChoreographer.self,
             JavaCollection.self, JavaIterator.self, JavaMapEntry.self,
             JavaRect.self, JavaWindowMetrics.self, JavaDisplayMetrics.self, JavaLocaleList.self, JavaResources.self,
-            JavaDisplayManager.self, JavaAudioManager.self, JavaPowerManager.self, JavaInputManager.self, JavaInputDevice.self,
+            JavaDisplayManager.self, JavaAudioManager.self, JavaPowerManager.self, JavaInputManager.self, JavaInputDevice.self, JavaMotionRange.self,
             JavaUri.self, JavaWindow.self, JavaSharedPreferences.self, JavaSharedPreferencesEditor.self,
             JavaSensorManager.self, JavaVibrator.self,
         ]
