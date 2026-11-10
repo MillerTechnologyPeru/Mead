@@ -67,3 +67,16 @@ nonisolated(unsafe) private var opened: [String] = []
     #expect(bionic_dlerror().map { String(cString: $0) } == "not in Mead's images")
     #expect(bionic_dlclose(handle) == 0)
 }
+
+@Test func aLibraryAskedForByNameIsFoundInTheSearchDirectories() {
+    guard let swiftCore = mapped("libswiftCore.so") else {
+        Issue.record("no libswiftCore.so mapped")
+        return
+    }
+    let directory = String(swiftCore[..<swiftCore.lastIndex(of: "/")!])
+    mead_dl_bio_add_search_directory("/no/such/directory")
+    mead_dl_bio_add_search_directory(directory)
+    let handle = bionic_dlopen("libswiftCore.so", RTLD_NOW)
+    #expect(handle != nil && bionic_dlsym(handle, "swift_retain") != nil)
+    bionic_dlclose(handle)
+}
