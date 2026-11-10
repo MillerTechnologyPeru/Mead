@@ -1,6 +1,15 @@
 {
-  "originHash" : "1096544d7718b6d6c4255165642ba6e99514bc8958d3fe2dcacdedd9fadfa74b",
+  "originHash" : "1c9993c7b96a7f36298b14f66641649ada22f902d17851a99d0dc9f29a0996f6",
   "pins" : [
+    {
+      "identity" : "swift-java-jni-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-java-jni-core",
+      "state" : {
+        "branch" : "main",
+        "revision" : "b440a0be98381550cf189c903782e817619ffa05"
+      }
+    },
     {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
