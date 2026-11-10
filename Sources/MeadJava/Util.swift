@@ -221,6 +221,30 @@ public final class JavaFile: JavaObject {
         super.init()
     }
 
+    @JavaMethod(signature: "(Ljava/io/File;Ljava/lang/String;)V") public convenience init(parent: JavaObject?, child: String?) {
+        self.init(path: Self.joined((parent as? JavaFile)?.path, child))
+    }
+
+    @JavaMethod(signature: "(Ljava/lang/String;Ljava/lang/String;)V") public convenience init(parentPath: String?, child: String?) {
+        self.init(path: Self.joined(parentPath, child))
+    }
+
+    private static func joined(_ parent: String?, _ child: String?) -> String {
+        guard let parent, !parent.isEmpty else { return child ?? "" }
+        return parent.hasSuffix("/") ? parent + (child ?? "") : "\(parent)/\(child ?? "")"
+    }
+
+    /// Drops or adds the write bits, as Java's setReadOnly and setWritable do.
+    private func setWriteBits(_ writable: Bool) -> Bool {
+        var status = stat()
+        guard stat(path, &status) == 0 else { return false }
+        let bits = mode_t(S_IWUSR | S_IWGRP | S_IWOTH)
+        return chmod(path, writable ? status.st_mode | mode_t(S_IWUSR) : status.st_mode & ~bits) == 0
+    }
+
+    @JavaMethod("setReadOnly") public func setReadOnly() -> Bool { setWriteBits(false) }
+    @JavaMethod("setWritable", signature: "(Z)Z") public func setWritable(_ writable: Bool) -> Bool { setWriteBits(writable) }
+
     @JavaMethod("getPath") public func getPath() -> String? { path }
     @JavaMethod("getAbsolutePath") public func getAbsolutePath() -> String? { path }
     @JavaMethod("toString") public func javaToString() -> String? { path }
