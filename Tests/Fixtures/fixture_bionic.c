@@ -27,6 +27,7 @@
 #include <sys/system_properties.h>
 #include <time.h>
 #include <unistd.h>
+#include <wchar.h>
 
 #define CHECK(condition)                                                                   \
     do {                                                                                   \
@@ -156,6 +157,27 @@ static int test_sigsuspend(void) {
     long first = lrand48();
     srand48(7);
     CHECK(lrand48() == first && first >= 0);
+    return 0;
+}
+
+// Wide-character streams take bionic's FILE, and environ is the host's.
+extern char **environ;
+
+static int test_wide_streams_and_environ(void) {
+    FILE *file = tmpfile();
+    CHECK(file != NULL);
+    CHECK(fputwc(L'A', file) == L'A');
+    rewind(file);
+    CHECK(getwc(file) == L'A');
+    CHECK(ungetwc(L'B', file) == L'B');
+    CHECK(getwc(file) == L'B');
+    fclose(file);
+    CHECK(environ != NULL);
+    setenv("MEAD_FIXTURE_ENVIRON", "1", 1);
+    int found = 0;
+    for (char **entry = environ; *entry; entry++)
+        found |= strcmp(*entry, "MEAD_FIXTURE_ENVIRON=1") == 0;
+    CHECK(found);
     return 0;
 }
 
@@ -431,7 +453,7 @@ int mead_selftest(void) {
     int (*const tests[])(void) = {
         test_stdio,    test_signals,          test_sysconf,           test_addrinfo,
         test_threads,  test_mutexes,          test_memory_and_jumps,  test_strings_and_files,
-        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,      test_basename_and_fnmatch, test_sigsuspend,
+        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,      test_basename_and_fnmatch, test_sigsuspend, test_wide_streams_and_environ,
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
         int failed = tests[index]();
