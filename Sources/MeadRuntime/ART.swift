@@ -5,10 +5,11 @@ internal import SwiftJavaJNICore
 /// Android's runtime, ART, hosted in Mead's process.
 ///
 /// ART comes from the art_standalone build (MillerTechnologyPeru/art_standalone)
-/// installed at `home`: `lib/art/libart.so` and its libraries, the boot class
-/// path in `lib/java/dex/art` (which ART finds beside libart), its own JNI
-/// libraries in `lib/java/dex/art/natives`, and `bin/dex2oat`, which compiles
-/// the boot class path and each app ahead of time.
+/// installed at `home`: `lib/art/libart.so` and its libraries, Android 10's
+/// boot class path in `lib/java/dex/art` (which ART finds beside libart), its
+/// own JNI libraries in `lib/java/dex/art/natives`, the ICU and time zone
+/// data in `share/art/etc`, and `bin/dex2oat`, which compiles the boot class
+/// path and each app ahead of time.
 ///
 /// ART loads every native library through libdl_bio's `bionic_dlopen`.
 /// MeadDLBio, loaded globally before libart, answers those calls: bionic
@@ -89,6 +90,10 @@ public final class ART {
         // beside libart's.
         Self.prepend("PATH", "\(home)/bin")
         Self.prepend("LD_LIBRARY_PATH", "\(home)/lib/art:\(home)/lib/java/dex/art/natives")
+        // The core library's ICU and time zone data, in etc/icu and etc/tz.
+        for variable in ["ANDROID_RUNTIME_ROOT", "ANDROID_TZDATA_ROOT"] where getenv(variable) == nil {
+            setenv(variable, "\(home)/share/art", 1)
+        }
         if getenv("ANDROID_DATA") == nil {
             let data = "\(getenv("HOME").map { String(cString: $0) } ?? "/tmp")/.mead/art"
             Self.makeDirectories(data)
