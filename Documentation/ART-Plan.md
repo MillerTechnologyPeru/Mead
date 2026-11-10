@@ -198,16 +198,23 @@ calling back into Java through ART's JNI.
 The release is **Android 10** (API 29), tag `android-security-10.0.0_r75`:
 art_standalone's ART was rebased on it, its concurrent-copying collector
 needs nothing special from the kernel, and the target apps need API 24 or
-later. The fork's libcore is still Android 8.1 (`android-8.1.0_r81`), so
+later. The fork's libcore was Android 8.1 (`android-8.1.0_r81`), so
 everything else moves to Android 10 to match.
 
 - **Java (dex) from AOSP's own build.** The boot class path (`core-oj`,
-  `core-libart`, `core-icu4j`, `conscrypt`, `okhttp`, `bouncycastle`,
-  `apache-xml`) and `framework.jar` are built by AOSP's build system from an
-  Android 10 tree on an x86_64 host (the Optiplex). Dex is independent of
-  the architecture, so these are what Android 10 itself ships.
+  `core-libart` with ICU4J inside it, `conscrypt`, `okhttp`, `bouncycastle`,
+  `apache-xml`, then `framework`, `ext`, `telephony-common`, `voip-common`,
+  `ims-common`, `updatable-media` and `android.test.base`) is built by AOSP's
+  build system from an Android 10 tree on an x86_64 host (the Optiplex;
+  `Scripts/aosp`). Dex is independent of the architecture, so these are
+  what Android 10 itself ships. ICU4J's data (`icudt63l.dat`) and the time
+  zones come from the same tree and install to `share/art/etc`, which
+  `ANDROID_RUNTIME_ROOT` and `ANDROID_TZDATA_ROOT` name.
 - **Native code built for arm64 glibc** from the same tag, on an arm64
-  device: libcore's (`libjavacore`, `libopenjdk`), Conscrypt's
+  device: libcore's (`libjavacore`, `libopenjdk`, `libandroidio`, with
+  libnativehelper; done: linked with the distribution's ICU4C, OpenSSL 3
+  for `NativeBN`, Expat and zlib, and checked by `Tests/ART/CoreCheck.java`
+  on the Retroid and the Duet), Conscrypt's
   (`libjavacrypto`, with BoringSSL in place of wolfSSL), and the
   framework's base libraries: `libandroid_runtime`, `libandroidfw`,
   `libbinder` (used in-process, for `Parcel` and local binders),
