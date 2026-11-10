@@ -239,6 +239,16 @@ void mead_bind_loaded(void) {
     mead_deps_unlock();
 }
 
+void mead_start_providers(const char *progname) {
+    mead_deps_init();
+    mead_deps_lock();
+    if (!providers_started) {
+        providers_started = true;
+        providers_startup(progname);
+    }
+    mead_deps_unlock();
+}
+
 void *mead_load_library(const char *path, char **error) {
     // Held through the initializers, as the Android linker holds its own:
     // the lock is recursive, so one of them may dlopen.
