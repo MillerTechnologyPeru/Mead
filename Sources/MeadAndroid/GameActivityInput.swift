@@ -1,5 +1,6 @@
 import CMeadWindow
 import Glibc
+import MeadJNI
 import MeadJava
 import MeadWindow
 
@@ -35,6 +36,33 @@ final class GameActivityInput {
     /// button is a finger, and moving with it held drags that finger.
     var mouseIsFinger = false
     private var mouseFingerDown = false
+    /// Set for a game that reads gamepads through Android's InputDevice (as
+    /// Unity's Input System does): each gamepad is listed as one, its buttons
+    /// arrive as key events and its sticks and triggers as joystick motion.
+    var handlesGamepads = false
+
+    /// A gamepad SDL has opened: what Android lists of it, and how to close it.
+    struct Gamepad {
+        let name: String
+        let vendorId: Int32
+        let productId: Int32
+        let close: () -> Void
+    }
+
+    /// How a gamepad is opened: SDL's way, unless a test stands in.
+    var openGamepad: (UInt32) -> Gamepad? = GameActivityInput.openSDLGamepad
+    private var gamepads: [UInt32: (gamepad: Gamepad, id: Int32, axes: [Int32: Float])] = [:]
+
+    static func openSDLGamepad(_ which: UInt32) -> Gamepad? {
+        guard let handle = SDL.openGamepad(which) else { return nil }
+        return Gamepad(name: SDL.getGamepadName?(handle).map { String(cString: $0) } ?? "Gamepad",
+                       vendorId: Int32(SDL.getGamepadVendor?(handle) ?? 0), productId: Int32(SDL.getGamepadProduct?(handle) ?? 0),
+                       close: { SDL.closeGamepad(handle) })
+    }
+
+    /// Android's ID for SDL's gamepad `which`, as the native runner gives it.
+    static func gamepadDeviceId(_ which: UInt32) -> Int32 { Int32(truncatingIfNeeded: which) &+ 100 }
+
     /// The finger the mouse plays, apart from any real finger's ID.
     private static let mouseFinger = UInt64.max
     /// SDL_TOUCH_MOUSEID: a mouse event SDL made up from a real touch, which
@@ -63,6 +91,7 @@ final class GameActivityInput {
         // Handled as they arrive, so the time they arrive is the time they happened.
         let time = clock()
         if mouseIsFinger, mouseAsFinger(event, pixelsPerPoint: scale, time: time) { return }
+        if handlesGamepads, gamepad(event, time: time) { return }
         switch Int(event.type) {
         case MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN, MEAD_SDL_EVENT_MOUSE_BUTTON_UP:
             let button = event.button
@@ -129,6 +158,45 @@ final class GameActivityInput {
         default:
             break
         }
+    }
+
+    /// Handles `event` if it's a gamepad's: true if it was.
+    private func gamepad(_ event: mead_sdl_event, time: Int64) -> Bool {
+        switch Int(event.type) {
+        case MEAD_SDL_EVENT_GAMEPAD_ADDED:
+            let which = event.gdevice.which
+            guard gamepads[which] == nil, let opened = openGamepad(which) else { return true }
+            let id = Self.gamepadDeviceId(which)
+            gamepads[which] = (opened, id, [:])
+            JavaRuntime.shared.trace("gamepad \(id) added: \(opened.name)")
+            JavaInputDevice.add(JavaInputDevice(gamepadID: id, name: opened.name, vendorId: opened.vendorId,
+                                                productId: opened.productId, controllerNumber: Int32(gamepads.count)))
+        case MEAD_SDL_EVENT_GAMEPAD_REMOVED:
+            guard let removed = gamepads.removeValue(forKey: event.gdevice.which) else { return true }
+            removed.gamepad.close()
+            JavaInputDevice.remove(id: removed.id)
+        case MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN, MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP:
+            let button = event.gbutton
+            let code = androidKeyCode(forGamepadButton: button.button)
+            guard code != 0, let id = gamepads[button.which]?.id else { return true }
+            sendKey(JavaKeyEvent(action: button.down ? JavaKeyEvent.actionDown : JavaKeyEvent.actionUp, keyCode: code, scanCode: 0,
+                                 metaState: 0, repeatCount: 0, unicodeChar: 0, eventTime: time, downTime: time,
+                                 source: JavaInputDevice.sourceGamepad, deviceId: id))
+        case MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            // Android reports every axis in each event, so they are kept.
+            let motion = event.gaxis
+            guard var state = gamepads[motion.which] else { return true }
+            for axis in androidAxes(forGamepadAxis: motion.axis) {
+                state.axes[axis] = androidAxisValue(motion.value)
+            }
+            gamepads[motion.which] = state
+            let pointer = JavaMotionEvent.Pointer(id: 0, toolType: 0, x: state.axes[0] ?? 0, y: state.axes[1] ?? 0, axes: state.axes)
+            sendMotion(JavaMotionEvent(action: JavaMotionEvent.actionMove, source: JavaInputDevice.sourceJoystick, deviceId: state.id,
+                                       eventTime: time, downTime: time, pointers: [pointer]))
+        default:
+            return false
+        }
+        return true
     }
 
     /// Handles `event` if it's the mouse's, as a finger: true if it was.
