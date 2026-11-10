@@ -131,3 +131,17 @@ SAME_FIELD(mead_sdl_gamepad_button_event, SDL_GamepadButtonEvent, down, down);
 SAME_FIELD(mead_sdl_gamepad_axis_event, SDL_GamepadAxisEvent, which, which);
 SAME_FIELD(mead_sdl_gamepad_axis_event, SDL_GamepadAxisEvent, axis, axis);
 SAME_FIELD(mead_sdl_gamepad_axis_event, SDL_GamepadAxisEvent, value, value);
+
+SAME_VALUE(MEAD_SDL_PIXELFORMAT_ABGR8888, SDL_PIXELFORMAT_ABGR8888);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, flags, flags);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, format, format);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, w, w);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, h, h);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, pitch, pitch);
+SAME_FIELD(mead_sdl_surface, SDL_Surface, pixels, pixels);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, displayID, displayID);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, format, format);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, w, w);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, h, h);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, pixel_density, pixel_density);
+SAME_FIELD(mead_sdl_display_mode, SDL_DisplayMode, refresh_rate, refresh_rate);
