@@ -37,4 +37,7 @@ cp external/icu/icu4c/source/stubdata/icudt63l.dat \
 cp system/timezone/output_data/iana/tzdata \
    system/timezone/output_data/version/tz_version \
    system/timezone/output_data/android/tzlookup.xml "$out/etc/tz/"
+# Conscrypt's CA certificates, from $ANDROID_ROOT/etc/security/cacerts.
+mkdir -p "$out/etc/security/cacerts"
+cp system/ca-certificates/files/* "$out/etc/security/cacerts/"
 ls -lR "$out"
