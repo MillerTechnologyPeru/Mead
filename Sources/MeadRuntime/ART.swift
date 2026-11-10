@@ -98,8 +98,12 @@ public final class ART {
         }
         // Android 10's boot class path, in the environment as Android has it,
         // so that the runtime and the dex2oat it starts agree on it.
+        // Mead's own, mead-framework.jar, after them.
         if getenv("BOOTCLASSPATH") == nil {
-            let jars = Self.bootClassPath.map { "\(home)/lib/java/dex/art/\($0).jar" }
+            var jars = Self.bootClassPath.map { "\(home)/lib/java/dex/art/\($0).jar" }
+            if let meadFramework = Self.meadFramework(providerDirectory: providerDirectory) {
+                jars.append(meadFramework)
+            }
             setenv("BOOTCLASSPATH", jars.joined(separator: ":"), 1)
         }
         if getenv("ANDROID_DATA") == nil {
@@ -149,6 +153,9 @@ public final class ART {
         // Mead's display bridge, over the libgui libandroid_runtime loaded;
         // an install without one has no windows.
         ARTDisplay.shared = try? ARTDisplay(home: home)
+
+        // The system services, in-process.
+        try startServices()
     }
 
     /// Android 10's boot class path, in order, as its init.environ.rc has it.
@@ -251,7 +258,7 @@ public final class ART {
 
     /// Prints the pending exception, as Java does for an uncaught one, and
     /// clears it.
-    private func describeException(_ env: JNIEnvironment) -> String {
+    func describeException(_ env: JNIEnvironment) -> String {
         guard let jni = env.pointee?.pointee, jni.ExceptionCheck(env) != 0 else { return "" }
         jni.ExceptionDescribe(env)
         jni.ExceptionClear(env)
