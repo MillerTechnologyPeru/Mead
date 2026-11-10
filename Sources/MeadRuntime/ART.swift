@@ -143,6 +143,9 @@ public final class ART {
         // class loader searches java.library.path, which is the app's.
         try load("\(nativesDirectory)/libandroid_runtime.so")
 
+        // What the zygote preloads that native code relies on having run.
+        try preload(Self.preloadedClasses)
+
         // Mead's display bridge, over the libgui libandroid_runtime loaded;
         // an install without one has no windows.
         ARTDisplay.shared = try? ARTDisplay(home: home)
@@ -154,6 +157,35 @@ public final class ART {
         "framework", "ext", "telephony-common", "voip-common", "ims-common",
         "updatable-media", "android.test.base",
     ]
+
+    /// Boot classes the zygote initializes before any app runs, whose
+    /// initializers native code depends on: Typeface's sets hwui's default
+    /// typeface, which drawing text with a Paint that has none uses.
+    static let preloadedClasses = ["android.graphics.Typeface"]
+
+    /// Initializes boot classes, as the zygote's preloading does, with
+    /// `Class.forName(name, true, null)`.
+    private func preload(_ classNames: [String]) throws {
+        let env = try virtualMachine.environment()
+        guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
+        guard let classType = jni.FindClass(env, "java/lang/Class"),
+              let forName = jni.GetStaticMethodID(env, classType, "forName",
+                                                  "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;") else {
+            throw Failure("no Class.forName\(describeException(env))")
+        }
+        for className in classNames {
+            var arguments = [jvalue(), jvalue(), jvalue()]
+            arguments[0].l = jni.NewStringUTF(env, className)
+            arguments[1].z = jboolean(JNI_TRUE)
+            arguments[2].l = nil
+            let loaded = jni.CallStaticObjectMethodA(env, classType, forName, &arguments)
+            jni.DeleteLocalRef(env, arguments[0].l)
+            if jni.ExceptionCheck(env) != 0 {
+                throw Failure("initializing \(className) threw\(describeException(env))")
+            }
+            jni.DeleteLocalRef(env, loaded)
+        }
+    }
 
     /// Loads a JNI library by path for the boot class loader, as
     /// `System.load` would from a boot class. `System.load` itself asks for
