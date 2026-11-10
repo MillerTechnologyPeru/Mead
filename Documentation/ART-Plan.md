@@ -296,8 +296,8 @@ How the graphics stack is built, as of the work so far:
   Region, Shader, Typeface, fonts, text, VectorDrawable, ImageDecoder,
   HardwareBuffer) is in `libandroid_runtime`, without Movie (GIF),
   SurfaceTexture and PDF. `Tests/ART/GraphicsCheck.java` draws with
-  `Canvas` into a `Bitmap` and round-trips PNG and JPEG: it passes on the
-  Duet.
+  `Canvas` into a `Bitmap` and round-trips PNG and JPEG: it passes on both
+  devices.
 
 Still to come in phase 4:
 
