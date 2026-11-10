@@ -142,6 +142,10 @@ public final class ART {
         // class loader, since no Java frame is calling. By path: the boot
         // class loader searches java.library.path, which is the app's.
         try load("\(nativesDirectory)/libandroid_runtime.so")
+
+        // Mead's display bridge, over the libgui libandroid_runtime loaded;
+        // an install without one has no windows.
+        ARTDisplay.shared = try? ARTDisplay(home: home)
     }
 
     /// Android 10's boot class path, in order, as its init.environ.rc has it.
@@ -181,6 +185,7 @@ public final class ART {
         let env = try virtualMachine.environment()
         guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
         let name = String(className.map { $0 == "." ? "/" : $0 })
+        ARTDisplay.shared?.registerNatives(env: env)
         guard let type = jni.FindClass(env, name) else {
             throw Failure("no class \(className)\(describeException(env))")
         }
