@@ -91,9 +91,16 @@ public final class ART {
         Self.prepend("PATH", "\(home)/bin")
         Self.prepend("LD_LIBRARY_PATH", "\(home)/lib/art:\(home)/lib/java/dex/art/natives")
         // The core library's ICU and time zone data, in etc/icu and etc/tz,
-        // and Conscrypt's CA certificates, in etc/security/cacerts.
+        // and Android's /system: Conscrypt's CA certificates, in
+        // etc/security/cacerts, the framework's resources and build.prop.
         for variable in ["ANDROID_ROOT", "ANDROID_RUNTIME_ROOT", "ANDROID_TZDATA_ROOT"] where getenv(variable) == nil {
             setenv(variable, "\(home)/share/art", 1)
+        }
+        // Android 10's boot class path, in the environment as Android has it,
+        // so that the runtime and the dex2oat it starts agree on it.
+        if getenv("BOOTCLASSPATH") == nil {
+            let jars = Self.bootClassPath.map { "\(home)/lib/java/dex/art/\($0).jar" }
+            setenv("BOOTCLASSPATH", jars.joined(separator: ":"), 1)
         }
         if getenv("ANDROID_DATA") == nil {
             let data = "\(getenv("HOME").map { String(cString: $0) } ?? "/tmp")/.mead/art"
@@ -129,6 +136,43 @@ public final class ART {
         vm = created
         virtualMachine = JavaVirtualMachine(adoptingJVM: created)
         JavaVirtualMachine.setSharedJVM(virtualMachine)
+
+        // The framework's JNI, which app_process registers before any Java
+        // runs: libandroid_runtime registers it as it loads, for the boot
+        // class loader, since no Java frame is calling. By path: the boot
+        // class loader searches java.library.path, which is the app's.
+        try load("\(nativesDirectory)/libandroid_runtime.so")
+    }
+
+    /// Android 10's boot class path, in order, as its init.environ.rc has it.
+    static let bootClassPath = [
+        "core-oj", "core-libart", "okhttp", "bouncycastle", "apache-xml", "conscrypt",
+        "framework", "ext", "telephony-common", "voip-common", "ims-common",
+        "updatable-media", "android.test.base",
+    ]
+
+    /// Loads a JNI library by path for the boot class loader, as
+    /// `System.load` would from a boot class. `System.load` itself asks for
+    /// its caller's class loader, and from here no Java frame is calling, so
+    /// this goes to `Runtime.load0` with `System` as the class loading it.
+    private func load(_ path: String) throws {
+        let env = try virtualMachine.environment()
+        guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
+        guard let system = jni.FindClass(env, "java/lang/System"),
+              let runtimeType = jni.FindClass(env, "java/lang/Runtime"),
+              let getRuntime = jni.GetStaticMethodID(env, runtimeType, "getRuntime", "()Ljava/lang/Runtime;"),
+              let load0 = jni.GetMethodID(env, runtimeType, "load0", "(Ljava/lang/Class;Ljava/lang/String;)V"),
+              let runtime = jni.CallStaticObjectMethodA(env, runtimeType, getRuntime, nil) else {
+            throw Failure("no Runtime.load0\(describeException(env))")
+        }
+        var arguments = [jvalue(), jvalue()]
+        arguments[0].l = system
+        arguments[1].l = jni.NewStringUTF(env, path)
+        jni.CallVoidMethodA(env, runtime, load0, &arguments)
+        jni.DeleteLocalRef(env, arguments[1].l)
+        if jni.ExceptionCheck(env) != 0 {
+            throw Failure("loading \(path) threw\(describeException(env))")
+        }
     }
 
     /// Calls `main(String[])` on the class named `className` ("com.example.Main"
