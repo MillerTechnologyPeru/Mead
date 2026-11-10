@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <link.h>
 #include <malloc.h>
+#include <math.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
@@ -178,6 +179,20 @@ static int test_wide_streams_and_environ(void) {
     for (char **entry = environ; *entry; entry++)
         found |= strcmp(*entry, "MEAD_FIXTURE_ENVIRON=1") == 0;
     CHECK(found);
+    return 0;
+}
+
+// libm's functions reach the host's libm, which Mead's providers load
+// privately: sincosf is the one Unity's FMOD and IL2CPP call.
+static int test_libm(void) {
+    volatile float angle = 0.5f;
+    float sine = 0, cosine = 0;
+    sincosf(angle, &sine, &cosine);
+    CHECK(fabsf(sine - 0.479426f) < 1e-5f && fabsf(cosine - 0.877583f) < 1e-5f);
+    volatile double wide = 0.5;
+    double wideSine = 0, wideCosine = 0;
+    sincos(wide, &wideSine, &wideCosine);
+    CHECK(fabs(wideSine - 0.4794255386) < 1e-9);
     return 0;
 }
 
@@ -453,7 +468,7 @@ int mead_selftest(void) {
     int (*const tests[])(void) = {
         test_stdio,    test_signals,          test_sysconf,           test_addrinfo,
         test_threads,  test_mutexes,          test_memory_and_jumps,  test_strings_and_files,
-        test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,      test_basename_and_fnmatch, test_sigsuspend, test_wide_streams_and_environ,
+        test_libm, test_android_services, test_dynamic_linker,    test_libstdcxx,         test_priority,          test_small_stacks,      test_basename_and_fnmatch, test_sigsuspend, test_wide_streams_and_environ,
     };
     for (size_t index = 0; index < sizeof(tests) / sizeof(tests[0]); index++) {
         int failed = tests[index]();

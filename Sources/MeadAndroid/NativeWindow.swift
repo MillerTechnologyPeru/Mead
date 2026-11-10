@@ -46,6 +46,13 @@ public final class NativeWindow {
         Unmanaged.passUnretained(self).toOpaque()
     }
 
+    /// MEAD_FULLSCREEN=1: the window covers the screen, as an Android app
+    /// does, for a handheld whose compositor would otherwise tile it.
+    static var fullscreenFlag: UInt64 {
+        guard let value = getenv("MEAD_FULLSCREEN"), String(cString: value) != "0" else { return 0 }
+        return MEAD_SDL_WINDOW_FULLSCREEN
+    }
+
     /// The window the running app was given.
     nonisolated(unsafe) static var current: NativeWindow?
 

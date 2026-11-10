@@ -35,7 +35,7 @@ final class GameActivityRunner {
 
         let width = size("MEAD_WINDOW_WIDTH", default: 1280)
         let height = size("MEAD_WINDOW_HEIGHT", default: 720)
-        var flags = MEAD_SDL_WINDOW_RESIZABLE
+        var flags = MEAD_SDL_WINDOW_RESIZABLE | NativeWindow.fullscreenFlag
         if Int(mead_graphics_api()) == MEAD_GRAPHICS_VULKAN {
             flags |= MEAD_SDL_WINDOW_VULKAN
         }

@@ -66,6 +66,24 @@ static void open_zlib(void) {
     zlib = dlopen("libz.so.1", RTLD_NOW | RTLD_LOCAL);
 }
 
+// glibc keeps its math in libm, which Mead's providers load privately: it is
+// in the global scope only once some library loaded globally has pulled it
+// in, which depends on load order. So libm is asked by name as well.
+static void *libm;
+
+static void open_libm(void) {
+    libm = dlopen("libm.so.6", RTLD_NOW | RTLD_LOCAL);
+}
+
+static void *host_symbol(const char *name) {
+    void *found = dlsym(RTLD_DEFAULT, name);
+    if (found)
+        return found;
+    static pthread_once_t opened = PTHREAD_ONCE_INIT;
+    pthread_once(&opened, open_libm);
+    return libm ? dlsym(libm, name) : NULL;
+}
+
 void *mead_bionic_lookup(const char *name) {
     static pthread_once_t sorted = PTHREAD_ONCE_INIT;
     pthread_once(&sorted, sort_table);
@@ -77,7 +95,7 @@ void *mead_bionic_lookup(const char *name) {
     case FROM_SHIM:
         return found->shim;
     case FROM_HOST:
-        return dlsym(RTLD_DEFAULT, found->host);
+        return host_symbol(found->host);
     case FROM_ZLIB: {
         static pthread_once_t opened = PTHREAD_ONCE_INIT;
         pthread_once(&opened, open_zlib);

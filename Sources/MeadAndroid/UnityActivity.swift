@@ -45,7 +45,7 @@ final class UnityRunner {
 
         let width = size("MEAD_WINDOW_WIDTH", default: 1280)
         let height = size("MEAD_WINDOW_HEIGHT", default: 720)
-        var flags = MEAD_SDL_WINDOW_RESIZABLE
+        var flags = MEAD_SDL_WINDOW_RESIZABLE | NativeWindow.fullscreenFlag
         if Int(mead_graphics_api()) == MEAD_GRAPHICS_VULKAN {
             flags |= MEAD_SDL_WINDOW_VULKAN
         }
@@ -137,6 +137,7 @@ final class UnityRunner {
         }
         let input = GameActivityInput(sendMotion: inject, sendKey: inject)
         input.mouseIsFinger = true
+        input.handlesGamepads = true
 
         // What Unity's SurfaceHolder callback does when the surface's size
         // changes: the graphics state is made again for it, which is when

@@ -15,6 +15,8 @@ public final class JavaArrayList: JavaObject {
         super.init()
     }
 
+    @JavaMethod("iterator", signature: "()Ljava/util/Iterator;") public func iterator() -> JavaIterator? { JavaIterator(elements) }
+
     @JavaMethod public init(capacity: Int32) {
         elements.reserveCapacity(max(Int(capacity), 0))
         super.init()

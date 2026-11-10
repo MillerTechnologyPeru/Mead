@@ -154,26 +154,149 @@ public final class JavaPowerManager: JavaObject {
 
 @JavaClass("android/hardware/input/InputManager")
 public final class JavaInputManager: JavaObject {
+    private static let listenerInterface = "android/hardware/input/InputManager$InputDeviceListener"
+    private static let listeners = LockedValue([JavaObject]())
+
     @JavaMethod("getInputDeviceIds", signature: "()[I") public func getInputDeviceIds() -> JavaObject? {
-        JavaRuntime.shared.newIntArray([])
+        JavaInputDevice.getDeviceIds()
+    }
+
+    @JavaMethod("getInputDevice", signature: "(I)Landroid/view/InputDevice;") public func getInputDevice(_ id: Int32) -> JavaInputDevice? {
+        JavaInputDevice.getDevice(id)
     }
 
     @JavaMethod("registerInputDeviceListener", signature: "(Landroid/hardware/input/InputManager$InputDeviceListener;Landroid/os/Handler;)V")
-    public func registerInputDeviceListener(_ listener: JavaObject?, _ handler: JavaObject?) {}
-
-    @JavaMethod("unregisterInputDeviceListener", signature: "(Landroid/hardware/input/InputManager$InputDeviceListener;)V")
-    public func unregisterInputDeviceListener(_ listener: JavaObject?) {}
-}
-
-/// android.view.InputDevice: Android's own devices, of which there are none;
-/// SDL's keyboard, mouse and gamepads reach games as events instead.
-@JavaClass("android/view/InputDevice")
-public final class JavaInputDevice: JavaObject {
-    @JavaMethod("getDeviceIds", signature: "()[I") public static func getDeviceIds() -> JavaObject? {
-        JavaRuntime.shared.newIntArray([])
+    public func registerInputDeviceListener(_ listener: JavaObject?, _ handler: JavaObject?) {
+        guard let listener else { return }
+        Self.listeners.withLock { $0.append(listener) }
     }
 
-    @JavaMethod("getDevice", signature: "(I)Landroid/view/InputDevice;") public static func getDevice(_ id: Int32) -> JavaInputDevice? { nil }
+    @JavaMethod("unregisterInputDeviceListener", signature: "(Landroid/hardware/input/InputManager$InputDeviceListener;)V")
+    public func unregisterInputDeviceListener(_ listener: JavaObject?) {
+        Self.listeners.withLock { $0.removeAll { $0 === listener } }
+    }
+
+    /// Tells the listeners, on the main thread, as Android's handler would.
+    static func announce(_ method: String, _ id: Int32) {
+        let listeners = Self.listeners.withLock { $0 }
+        guard !listeners.isEmpty else { return }
+        JavaLooper.main.post {
+            let thread = JavaRuntime.shared.attachCurrentThread()
+            var value = jvalue()
+            value.i = id
+            for listener in listeners {
+                thread.call(listenerInterface, method, "(I)V", on: listener, [value])
+            }
+        }
+    }
+}
+
+/// android.view.InputDevice$MotionRange: one axis of a device, and its range.
+@JavaClass("android/view/InputDevice$MotionRange")
+public final class JavaMotionRange: JavaObject {
+    public let axis: Int32
+    public let source: Int32
+    public let min: Float
+    public let max: Float
+    public let flat: Float
+
+    public init(axis: Int32, source: Int32, min: Float, max: Float, flat: Float) {
+        self.axis = axis
+        self.source = source
+        self.min = min
+        self.max = max
+        self.flat = flat
+        super.init()
+    }
+
+    @JavaMethod("getAxis") public func getAxis() -> Int32 { axis }
+    @JavaMethod("getSource") public func getSource() -> Int32 { source }
+    @JavaMethod("isFromSource") public func isFromSource(_ source: Int32) -> Bool { self.source & source == source }
+    @JavaMethod("getMin") public func getMin() -> Float { min }
+    @JavaMethod("getMax") public func getMax() -> Float { max }
+    @JavaMethod("getRange") public func getRange() -> Float { max - min }
+    @JavaMethod("getFlat") public func getFlat() -> Float { flat }
+    @JavaMethod("getFuzz") public func getFuzz() -> Float { 0 }
+    @JavaMethod("getResolution") public func getResolution() -> Float { 0 }
+}
+
+/// android.view.InputDevice: the host's gamepads, as Android lists them.
+/// The keyboard, mouse and touchscreen reach games as events alone.
+@JavaClass("android/view/InputDevice")
+public final class JavaInputDevice: JavaObject {
+    public static let sourceGamepad: Int32 = 0x401
+    public static let sourceJoystick: Int32 = 0x0100_0010
+
+    public let id: Int32
+    public let name: String
+    public let vendorId: Int32
+    public let productId: Int32
+    public let controllerNumber: Int32
+    public let sources: Int32
+    public let ranges: [JavaMotionRange]
+
+    /// A gamepad: two sticks and two triggers, under Android's axis numbers.
+    public init(gamepadID id: Int32, name: String, vendorId: Int32, productId: Int32, controllerNumber: Int32) {
+        self.id = id
+        self.name = name
+        self.vendorId = vendorId
+        self.productId = productId
+        self.controllerNumber = controllerNumber
+        sources = Self.sourceGamepad | Self.sourceJoystick
+        let stick: [Int32] = [0, 1, 11, 14]          // X, Y, Z, RZ
+        let trigger: [Int32] = [17, 18, 22, 23]       // LTRIGGER, RTRIGGER, GAS, BRAKE
+        ranges = stick.map { JavaMotionRange(axis: $0, source: Self.sourceJoystick, min: -1, max: 1, flat: 0.1) }
+            + trigger.map { JavaMotionRange(axis: $0, source: Self.sourceJoystick, min: 0, max: 1, flat: 0) }
+        super.init()
+    }
+
+    private static let connected = LockedValue([Int32: JavaInputDevice]())
+
+    /// A device plugged in: listed from now on, and announced.
+    public static func add(_ device: JavaInputDevice) {
+        connected.withLock { $0[device.id] = device }
+        JavaInputManager.announce("onInputDeviceAdded", device.id)
+    }
+
+    public static func remove(id: Int32) {
+        guard connected.withLock({ $0.removeValue(forKey: id) }) != nil else { return }
+        JavaInputManager.announce("onInputDeviceRemoved", id)
+    }
+
+    @JavaMethod("getDeviceIds", signature: "()[I") public static func getDeviceIds() -> JavaObject? {
+        JavaRuntime.shared.newIntArray(connected.withLock { $0.keys.sorted() })
+    }
+
+    @JavaMethod("getDevice", signature: "(I)Landroid/view/InputDevice;") public static func getDevice(_ id: Int32) -> JavaInputDevice? {
+        connected.withLock { $0[id] }
+    }
+
+    @JavaMethod("getId") public func getId() -> Int32 { id }
+    @JavaMethod("getName") public func getName() -> String? { name }
+    @JavaMethod("getDescriptor") public func getDescriptor() -> String? { "mead-gamepad-\(vendorId)-\(productId)-\(controllerNumber)" }
+    @JavaMethod("getVendorId") public func getVendorId() -> Int32 { vendorId }
+    @JavaMethod("getProductId") public func getProductId() -> Int32 { productId }
+    @JavaMethod("getControllerNumber") public func getControllerNumber() -> Int32 { controllerNumber }
+    @JavaMethod("getSources") public func getSources() -> Int32 { sources }
+    @JavaMethod("supportsSource") public func supportsSource(_ source: Int32) -> Bool { sources & source == source }
+    @JavaMethod("isVirtual") public func isVirtual() -> Bool { false }
+    @JavaMethod("isExternal") public func isExternal() -> Bool { true }
+    @JavaMethod("isEnabled") public func isEnabled() -> Bool { true }
+    @JavaMethod("getKeyboardType") public func getKeyboardType() -> Int32 { 1 }  // non-alphabetic
+
+    @JavaMethod("getMotionRanges", signature: "()Ljava/util/List;") public func getMotionRanges() -> JavaArrayList? {
+        let list = JavaArrayList()
+        list.elements = ranges
+        return list
+    }
+
+    @JavaMethod("getMotionRange", signature: "(I)Landroid/view/InputDevice$MotionRange;")
+    public func getMotionRange(_ axis: Int32) -> JavaMotionRange? { ranges.first { $0.axis == axis } }
+
+    @JavaMethod("getMotionRange", signature: "(II)Landroid/view/InputDevice$MotionRange;")
+    public func getMotionRange(_ axis: Int32, _ source: Int32) -> JavaMotionRange? {
+        ranges.first { $0.axis == axis && $0.isFromSource(source) }
+    }
 }
 
 @JavaClass("android/net/Uri")

@@ -58,7 +58,7 @@ final class ActivityRunner {
         }
         // Never flagged for OpenGL: SDL would make an EGL surface of its own
         // on the window, and a window can only have one, which is the game's.
-        var windowFlags = MEAD_SDL_WINDOW_RESIZABLE
+        var windowFlags = MEAD_SDL_WINDOW_RESIZABLE | NativeWindow.fullscreenFlag
         if Int(mead_graphics_api()) == MEAD_GRAPHICS_VULKAN {
             windowFlags |= MEAD_SDL_WINDOW_VULKAN
         }
