@@ -25,9 +25,26 @@ open class JavaUnityPlayerActivity: JavaActivity {
 open class JavaUnityPlayer: JavaObject {
     public let activity: JavaUnityPlayerActivity
 
+    /// What plugins (Firebase's among them) read to find the activity.
+    @JavaField("currentActivity", signature: "Landroid/app/Activity;")
+    public static var currentActivity: JavaObject? = nil
+
     public init(activity: JavaUnityPlayerActivity) {
         self.activity = activity
         super.init()
+        Self.currentActivity = activity
+    }
+
+    /// A plugin's library, by System.loadLibrary's name, with its JNI_OnLoad.
+    @JavaMethod("loadLibrary") public func loadLibrary(_ name: String?) -> Bool {
+        JavaRuntime.shared.trace("UnityPlayer.loadLibrary \(name ?? "null")")
+        guard let name else { return false }
+        do {
+            try JavaSystem.loadNamed(name)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Work the engine hands to its main thread: Unity's Java keeps a queue,
