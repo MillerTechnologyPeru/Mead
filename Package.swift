@@ -14,6 +14,8 @@ let package = Package(
         // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
         .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
         .library(name: "MeadDLBio", type: .dynamic, targets: ["CMeadDLBio"]),
+        // Runs Java on ART, in the providers' process: `mead --dex`.
+        .library(name: "MeadART", type: .dynamic, targets: ["MeadART"]),
         // Stands in for libandroid.so and libart.so: one library, as there
         // is to be one JVM however many things need it.
         .library(name: "MeadAndroid", type: .dynamic, targets: ["MeadAndroid"]),
@@ -25,6 +27,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "604.0.0"),
+        .package(url: "https://github.com/swiftlang/swift-java-jni-core", branch: "main"),
     ],
     targets: [
         // Interface between the loader and the provider libraries that
@@ -133,6 +136,18 @@ let package = Package(
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .target(name: "CMeadDLBio"),
+        .target(
+            name: "MeadRuntime",
+            dependencies: [.product(name: "SwiftJavaJNICore", package: "swift-java-jni-core")]
+        ),
+        .target(
+            name: "MeadART",
+            dependencies: ["MeadInterface", "MeadRuntime"]
+        ),
+        .testTarget(
+            name: "MeadRuntimeTests",
+            dependencies: ["MeadRuntime"]
+        ),
         .testTarget(
             name: "MeadDLBioTests",
             dependencies: ["CMeadDLBio"]
