@@ -90,8 +90,9 @@ public final class ART {
         // beside libart's.
         Self.prepend("PATH", "\(home)/bin")
         Self.prepend("LD_LIBRARY_PATH", "\(home)/lib/art:\(home)/lib/java/dex/art/natives")
-        // The core library's ICU and time zone data, in etc/icu and etc/tz.
-        for variable in ["ANDROID_RUNTIME_ROOT", "ANDROID_TZDATA_ROOT"] where getenv(variable) == nil {
+        // The core library's ICU and time zone data, in etc/icu and etc/tz,
+        // and Conscrypt's CA certificates, in etc/security/cacerts.
+        for variable in ["ANDROID_ROOT", "ANDROID_RUNTIME_ROOT", "ANDROID_TZDATA_ROOT"] where getenv(variable) == nil {
             setenv(variable, "\(home)/share/art", 1)
         }
         if getenv("ANDROID_DATA") == nil {
