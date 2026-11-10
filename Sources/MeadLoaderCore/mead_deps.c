@@ -40,6 +40,8 @@ static const struct {
     { "libaaudio.so",     "libMeadOpenSLES.so" },
     { "libart.so",        "libMeadAndroid.so" },
     { "libnativehelper.so", "libMeadAndroid.so" },
+    // No Android soname: listed so that mead --dex finds ART's runner.
+    { "libmead_art.so",   "libMeadART.so" },
 };
 #define PROVIDER_COUNT (sizeof(providers) / sizeof(providers[0]))
 
