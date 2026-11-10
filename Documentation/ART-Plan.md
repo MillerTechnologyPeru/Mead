@@ -274,16 +274,43 @@ How the graphics stack is built, as of the work so far:
   is a later speedup.
 - **minikin** is Android 10's, over the distribution's HarfBuzz and ICU.
   Done.
-- **libui** stays AOSP's, with its HIDL-generated graphics types carried as
-  generated headers and libhidl's base for them; only `GraphicBuffer`'s
-  gralloc backend is Mead's, backed by memory.
+- **libui** stays AOSP's, built without BufferHub (Android's vendor
+  configuration), with its HIDL-generated graphics types carried as
+  generated headers and libhidl's base for them. Only its gralloc is Mead's:
+  buffers in memfd shared memory, so a handle can go to another process as
+  it is. libnativewindow, libsync and libgrallocusage are AOSP's. Done.
 - **libgui** is Mead's: hwui uses it at exactly the bridge points (`Surface`
   as the `ANativeWindow` it renders to, `SurfaceComposerClient`'s display
   info, `DisplayEventReceiver` for vsync). Mead provides those classes under
-  AOSP's names, in C++, over a C interface that the Swift SDL bridge fills
-  in.
-- **hwui** is Android 10's, with the GL and Vulkan pipelines rendering to
-  Mead's `Surface`.
+  AOSP's names, in C++, over a C interface (`mead/gui.h`) that the Swift SDL
+  bridge fills in: `mead_gui_set_display`, `mead_gui_vsync`, and
+  `mead_surface_create`, whose surface presents each queued frame to a
+  callback. Until the bridge delivers vsync, a timer at the display's
+  refresh rate does. `SyncFeatures` is AOSP's. Done, untried with a window.
+- **hwui** is Android 10's, with the GL and Vulkan pipelines, linked with
+  Mesa's EGL and Vulkan; EGL's and GLES's extension functions, which
+  Android's libraries export, are looked up with `eglGetProcAddress`. Built
+  without TextureView's `SurfaceTexture`, which needs libgui's `BufferQueue`.
+  Done.
+- **The graphics JNI** (Bitmap, BitmapFactory, Canvas, Paint, Path, Matrix,
+  Region, Shader, Typeface, fonts, text, VectorDrawable, ImageDecoder,
+  HardwareBuffer) is in `libandroid_runtime`, without Movie (GIF),
+  SurfaceTexture and PDF. `Tests/ART/GraphicsCheck.java` draws with
+  `Canvas` into a `Bitmap` and round-trips PNG and JPEG: it passes on the
+  Duet.
+
+Still to come in phase 4:
+
+- **The window.** EGL on Mesa can't take an `ANativeWindow` as its window, so
+  hwui's EGL surface must be made on the SDL window's native one
+  (`wl_egl_window` or the X11 window), from the `Surface` the bridge
+  creates; software frames (`Surface.lockCanvas`) go through
+  `mead_surface_create`'s callback.
+- **System fonts**: `Typeface` reads `/system/etc/fonts.xml` and
+  `/system/fonts`, so text needs Android's fonts under `ANDROID_ROOT` and
+  those paths mapped there.
+- **TextureView**: libgui's `BufferQueue`, in-process.
+- Input, `Choreographer` and audio, as listed above.
 
 ### Phase 5: in-process system services (Swift)
 
