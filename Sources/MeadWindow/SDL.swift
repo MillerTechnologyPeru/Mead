@@ -23,6 +23,9 @@ public enum SDL {
     public nonisolated(unsafe) static var waitEventTimeout: (@convention(c) (EventPointer?, Int32) -> Bool)!
     public nonisolated(unsafe) static var openGamepad: (@convention(c) (UInt32) -> Pointer?)!
     public nonisolated(unsafe) static var closeGamepad: (@convention(c) (Pointer?) -> Void)!
+    public nonisolated(unsafe) static var getGamepadName: (@convention(c) (Pointer?) -> UnsafePointer<CChar>?)!
+    public nonisolated(unsafe) static var getGamepadVendor: (@convention(c) (Pointer?) -> UInt16)!
+    public nonisolated(unsafe) static var getGamepadProduct: (@convention(c) (Pointer?) -> UInt16)!
     public nonisolated(unsafe) static var pushEvent: (@convention(c) (EventPointer?) -> Bool)!
 
     public static var lastError: String {
@@ -64,6 +67,9 @@ public enum SDL {
         waitEventTimeout = bind("SDL_WaitEventTimeout")
         openGamepad = bind("SDL_OpenGamepad")
         closeGamepad = bind("SDL_CloseGamepad")
+        getGamepadName = bind("SDL_GetGamepadName")
+        getGamepadVendor = bind("SDL_GetGamepadVendor")
+        getGamepadProduct = bind("SDL_GetGamepadProduct")
         pushEvent = bind("SDL_PushEvent")
         return complete
     }
