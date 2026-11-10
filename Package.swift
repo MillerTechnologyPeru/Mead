@@ -13,6 +13,7 @@ let package = Package(
         .library(name: "MeadGooglePlay", targets: ["MeadGooglePlay"]),
         // Stands in for libc.so, libm.so, libdl.so, liblog.so and libz.so.
         .library(name: "MeadBionic", type: .dynamic, targets: ["MeadBionic"]),
+        .library(name: "MeadDLBio", type: .dynamic, targets: ["CMeadDLBio"]),
         // Stands in for libandroid.so and libart.so: one library, as there
         // is to be one JVM however many things need it.
         .library(name: "MeadAndroid", type: .dynamic, targets: ["MeadAndroid"]),
@@ -130,6 +131,11 @@ let package = Package(
             name: "MeadJNITests",
             dependencies: ["MeadJNI"],
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .target(name: "CMeadDLBio"),
+        .testTarget(
+            name: "MeadDLBioTests",
+            dependencies: ["CMeadDLBio"]
         ),
         .testTarget(
             name: "MeadLoaderTests",
