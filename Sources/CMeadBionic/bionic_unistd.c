@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // bionic numbers sysconf's and pathconf's names differently from glibc.
@@ -169,3 +170,5 @@ char *bionic_basename(const char *path) {
     buffer[length] = 0;
     return buffer;
 }
+
+mode_t bionic___umask_chk(mode_t mode) { return umask(mode); }
