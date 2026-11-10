@@ -203,19 +203,7 @@ final class GameActivityInput {
     }
 
     static func metaState(_ mod: UInt16) -> Int32 {
-        let mod = Int(mod)
-        var state: Int32 = 0
-        if mod & MEAD_SDL_KMOD_LSHIFT != 0 { state |= JavaKeyEvent.metaShiftOn | 0x40 }
-        if mod & MEAD_SDL_KMOD_RSHIFT != 0 { state |= JavaKeyEvent.metaShiftOn | 0x80 }
-        if mod & MEAD_SDL_KMOD_LALT != 0 { state |= JavaKeyEvent.metaAltOn | 0x10 }
-        if mod & MEAD_SDL_KMOD_RALT != 0 { state |= JavaKeyEvent.metaAltOn | 0x20 }
-        if mod & MEAD_SDL_KMOD_LCTRL != 0 { state |= JavaKeyEvent.metaCtrlOn | 0x2000 }
-        if mod & MEAD_SDL_KMOD_RCTRL != 0 { state |= JavaKeyEvent.metaCtrlOn | 0x4000 }
-        if mod & MEAD_SDL_KMOD_LGUI != 0 { state |= JavaKeyEvent.metaMetaOn | 0x20000 }
-        if mod & MEAD_SDL_KMOD_RGUI != 0 { state |= JavaKeyEvent.metaMetaOn | 0x40000 }
-        if mod & MEAD_SDL_KMOD_CAPS != 0 { state |= JavaKeyEvent.metaCapsLockOn }
-        if mod & MEAD_SDL_KMOD_NUM != 0 { state |= JavaKeyEvent.metaNumLockOn }
-        return state
+        androidMetaState(mod)
     }
 
     /// The character a key types, as KeyEvent.getUnicodeChar has it, from SDL's
