@@ -222,12 +222,25 @@ everything else moves to Android 10 to match.
   `Tests/ART/CryptoCheck.java`, TLS 1.3 included), and the
   framework's base libraries: `libandroid_runtime`, `libandroidfw`,
   `libbinder` (used in-process, for `Parcel` and local binders),
-  `libutils`, `libcutils`, `libbase`, `libziparchive`, ICU.
+  `libutils`, `libcutils`, `libbase`, `libziparchive`, ICU. Done so far:
+  Android 10's `libandroidfw`, `libbinder` and a first `libandroid_runtime`
+  (Log, SystemClock, SystemProperties, Trace, Binder, Parcel, AssetManager,
+  ApkAssets, StringBlock, XmlBlock), on the fork's newer `libutils`,
+  `libbase` and `libziparchive`. `libandroid_runtime` registers its JNI from
+  `JNI_OnLoad`, which Mead's `ART` calls right after the VM starts, as
+  `app_process` would, and loads `$ANDROID_ROOT/build.prop` as init does.
+  `ANDROID_ROOT` is Android's `/system` (`share/art`), with
+  `framework/framework-res.apk`; `BOOTCLASSPATH` is in the environment as on
+  Android. The rest of the framework's JNI comes with the phases that need
+  it (graphics, views and input in phase 4).
 - Stub what reaches the system: `ServiceManager` returns Mead's in-process
   services (phase 5); anything else fails cleanly.
 
 Exit: a dex creates `Context`-free framework objects (`Bundle`, `Intent`,
-`Parcel` round trips, `Resources` from an APK's `resources.arsc`).
+`Parcel` round trips, `Resources` from an APK's `resources.arsc`). Met:
+`Tests/ART/FrameworkCheck.java` passes on the Retroid and the Duet,
+reading `framework-res.apk`'s resources. The `ServiceManager` stub waits for
+phase 5's services.
 
 ### Phase 4: the SDL bridge (Swift)
 
