@@ -215,7 +215,11 @@ everything else moves to Android 10 to match.
   libnativehelper; done: linked with the distribution's ICU4C, OpenSSL 3
   for `NativeBN`, Expat and zlib, and checked by `Tests/ART/CoreCheck.java`
   on the Retroid and the Duet), Conscrypt's
-  (`libjavacrypto`, with BoringSSL in place of wolfSSL), and the
+  (`libjavacrypto`, with BoringSSL in place of wolfSSL; done: BoringSSL is
+  linked in statically with its symbols hidden, so it never meets the
+  distribution's OpenSSL, and Android's CA certificates install to
+  `share/art/etc/security/cacerts`, which `ANDROID_ROOT` names; checked by
+  `Tests/ART/CryptoCheck.java`, TLS 1.3 included), and the
   framework's base libraries: `libandroid_runtime`, `libandroidfw`,
   `libbinder` (used in-process, for `Parcel` and local binders),
   `libutils`, `libcutils`, `libbase`, `libziparchive`, ICU.
