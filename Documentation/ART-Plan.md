@@ -143,11 +143,8 @@ built natively on an arm64 Debian device, not in Docker.
    - *One AOSP release built for glibc*: ART, libcore and the framework from
      the same tag, so the framework's dependencies on ART internals match. AOSP
      builds ART for glibc hosts only on x86_64; arm64 glibc needs porting.
-   - Recommendation: art_standalone to start (phases 1–2), and one AOSP
-     release before the framework lands (phase 3). Pick the release then:
-     recent enough for current apps' dex versions, and whose garbage
-     collector runs on the devices' kernels (Android 14's needs
-     `userfaultfd`; concurrent copying is the fallback).
+   - Decided: art_standalone's ART (Android 10) for phases 1–2, then
+     Android 10 for everything in phase 3.
 2. **Where the framework's Java and natives come from.** Build `framework.jar`
    and its natives from the chosen release's source, or take a matching AOSP
    build's prebuilts (`framework.jar` is dex; its natives are bionic and could
@@ -198,11 +195,23 @@ calling back into Java through ART's JNI.
 
 ### Phase 3: one Android release, and the framework's Java
 
-- Move ART, libcore and `framework.jar` to the release chosen in phase 0.
-- Build the framework's base natives for glibc: `libandroid_runtime`,
-  `libandroidfw` (resources, assets, APK reading), `libbinder` (used
-  in-process, for `Parcel` and local binders), `libutils`, `libcutils`,
-  `libbase`, `libziparchive`, ICU.
+The release is **Android 10** (API 29), tag `android-security-10.0.0_r75`:
+art_standalone's ART was rebased on it, its concurrent-copying collector
+needs nothing special from the kernel, and the target apps need API 24 or
+later. The fork's libcore is still Android 8.1 (`android-8.1.0_r81`), so
+everything else moves to Android 10 to match.
+
+- **Java (dex) from AOSP's own build.** The boot class path (`core-oj`,
+  `core-libart`, `core-icu4j`, `conscrypt`, `okhttp`, `bouncycastle`,
+  `apache-xml`) and `framework.jar` are built by AOSP's build system from an
+  Android 10 tree on an x86_64 host (the Optiplex). Dex is independent of
+  the architecture, so these are what Android 10 itself ships.
+- **Native code built for arm64 glibc** from the same tag, on an arm64
+  device: libcore's (`libjavacore`, `libopenjdk`), Conscrypt's
+  (`libjavacrypto`, with BoringSSL in place of wolfSSL), and the
+  framework's base libraries: `libandroid_runtime`, `libandroidfw`,
+  `libbinder` (used in-process, for `Parcel` and local binders),
+  `libutils`, `libcutils`, `libbase`, `libziparchive`, ICU.
 - Stub what reaches the system: `ServiceManager` returns Mead's in-process
   services (phase 5); anything else fails cleanly.
 
