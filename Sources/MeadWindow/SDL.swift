@@ -31,6 +31,8 @@ public enum SDL {
     public nonisolated(unsafe) static var getPrimaryDisplay: (@convention(c) () -> UInt32)!
     public nonisolated(unsafe) static var getCurrentDisplayMode: (@convention(c) (UInt32) -> UnsafePointer<mead_sdl_display_mode>?)!
     public nonisolated(unsafe) static var getDisplayContentScale: (@convention(c) (UInt32) -> Float)!
+    public nonisolated(unsafe) static var registerEvents: (@convention(c) (Int32) -> UInt32)!
+    public nonisolated(unsafe) static var getWindowID: (@convention(c) (Pointer?) -> UInt32)!
 
     public static var lastError: String {
         getError?().map { String(cString: $0) } ?? "SDL is not loaded"
@@ -79,6 +81,8 @@ public enum SDL {
         getPrimaryDisplay = bind("SDL_GetPrimaryDisplay")
         getCurrentDisplayMode = bind("SDL_GetCurrentDisplayMode")
         getDisplayContentScale = bind("SDL_GetDisplayContentScale")
+        registerEvents = bind("SDL_RegisterEvents")
+        getWindowID = bind("SDL_GetWindowID")
         return complete
     }
 }
