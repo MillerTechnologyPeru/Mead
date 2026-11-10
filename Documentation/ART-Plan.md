@@ -299,13 +299,22 @@ How the graphics stack is built, as of the work so far:
   `Canvas` into a `Bitmap` and round-trips PNG and JPEG: it passes on both
   devices.
 
+- **The window** (`Sources/MeadRuntime/ARTDisplay.swift`): the bridge makes
+  an SDL window, describes the display and the windowing connection to
+  libgui, and hands Java an `android.view.Surface` for it (Mead's own
+  Surface JNI, in libandroid_runtime). Software frames
+  (`Surface.lockCanvas`) go through the surface's buffers to the bridge,
+  which copies them to the window. hwui's EGL display is made on the
+  bridge's Wayland or X11 connection, and its window surfaces on the
+  `wl_egl_window` or X11 window behind Mead's surface, since Mesa's EGL
+  can't take an `ANativeWindow`. Until the window manager hands out
+  surfaces, Java asks for one through `mead.view.MeadWindow`, whose natives
+  Mead registers when a program has the class. `Tests/ART/WindowCheck.java`
+  draws both ways and reads the frames back through `MEAD_FRAME_DUMP`; it
+  passes on the Duet's GNOME (Wayland) session.
+
 Still to come in phase 4:
 
-- **The window.** EGL on Mesa can't take an `ANativeWindow` as its window, so
-  hwui's EGL surface must be made on the SDL window's native one
-  (`wl_egl_window` or the X11 window), from the `Surface` the bridge
-  creates; software frames (`Surface.lockCanvas`) go through
-  `mead_surface_create`'s callback.
 - **System fonts**: `Typeface` reads `/system/etc/fonts.xml` and
   `/system/fonts`, so text needs Android's fonts under `ANDROID_ROOT` and
   those paths mapped there.
