@@ -311,6 +311,43 @@ private final class InputRecorder {
     #expect(recorder.motions.last?.getActionMasked() == JavaMotionEvent.actionPointerDown && recorder.motions.last?.getActionIndex() == 1)
 }
 
+@Test func aGamepadIsAnAndroidInputDevice() {
+    MinecraftFramework.register()
+    let recorder = InputRecorder()
+    var closed = false
+    recorder.input.handlesGamepads = true
+    recorder.input.openGamepad = { _ in GameActivityInput.Gamepad(name: "Retroid Pocket Controller", vendorId: 0x2020, productId: 0x3001, close: { closed = true }) }
+    recorder.send { $0.gdevice.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_ADDED); $0.gdevice.which = 7 }
+    let device = JavaInputDevice.getDevice(107)
+    #expect(device?.getName() == "Retroid Pocket Controller" && device?.supportsSource(JavaInputDevice.sourceGamepad) == true)
+    #expect(device?.getMotionRange(14)?.getMin() == -1 && device?.getMotionRange(17)?.getMin() == 0)
+    // Unity walks the axes with the list's iterator.
+    var walked: [Int32] = []
+    let ranges = device?.getMotionRanges()?.iterator()
+    while ranges?.hasNext() == true, let range = (try? ranges?.next()) as? JavaMotionRange { walked.append(range.getAxis()) }
+    #expect(walked == [0, 1, 11, 14, 17, 18, 22, 23])
+    #expect((JavaInputDevice.getDeviceIds() as? JavaPrimitiveArray).map { $0.count } ?? 0 >= 1)
+    recorder.send { $0.gbutton.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN); $0.gbutton.which = 7; $0.gbutton.button = UInt8(MEAD_SDL_GAMEPAD_BUTTON_SOUTH); $0.gbutton.down = true }
+    #expect(recorder.keys.last?.keyCode == 96 && recorder.keys.last?.source == JavaInputDevice.sourceGamepad && recorder.keys.last?.deviceId == 107)
+    recorder.send { $0.gaxis.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION); $0.gaxis.which = 7; $0.gaxis.axis = UInt8(MEAD_SDL_GAMEPAD_AXIS_LEFTX); $0.gaxis.value = 32767 }
+    recorder.send { $0.gaxis.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION); $0.gaxis.which = 7; $0.gaxis.axis = UInt8(MEAD_SDL_GAMEPAD_AXIS_RIGHT_TRIGGER); $0.gaxis.value = 32767 }
+    let motion = recorder.motions.last
+    #expect(motion?.source == JavaInputDevice.sourceJoystick && motion?.deviceId == 107)
+    // The event's device is the gamepad, and Unity's virtual call through
+    // InputEvent finds the method in the event's own class, as JNI does.
+    #expect(motion?.getDevice() === device && recorder.keys.last?.getDevice() === device)
+    let key = MemberKey(name: "getDevice", signature: "()Landroid/view/InputDevice;")
+    #expect(motion?.javaClass.findMethod(key)?.isSynthesized == false)
+    #expect(recorder.keys.last?.javaClass.findMethod(key)?.isSynthesized == false)
+    #expect(motion?.getAxisValue(0, 0) == 1 && motion?.getAxisValue(18, 0) == 1 && motion?.getAxisValue(22, 0) == 1)
+    #expect(motion?.getAxisValue(0) == 1)
+    // A gamepad not opened isn't heard.
+    recorder.send { $0.gbutton.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN); $0.gbutton.which = 9; $0.gbutton.button = 0; $0.gbutton.down = true }
+    #expect(recorder.keys.count == 1)
+    recorder.send { $0.gdevice.type = UInt32(MEAD_SDL_EVENT_GAMEPAD_REMOVED); $0.gdevice.which = 7 }
+    #expect(closed && JavaInputDevice.getDevice(107) == nil)
+}
+
 @Test func twoFingersAreTwoPointers() {
     MinecraftFramework.register()
     let recorder = InputRecorder()
@@ -634,6 +671,16 @@ nonisolated(unsafe) private var framesSeen: [Int64] = []
     #expect(answers.withLock { $0 } == [false, false])
     let games = JavaRuntime.shared.findClassPublic(named: "com/google/android/gms/games/PlayGames")!
     #expect(JavaUnityReflectionHelper.getMethodID(games, "getGamesSignInClient", "(Lcom.unity3d.player.UnityPlayerActivity;)Ljava/lang/Object;", true)?.method.isSynthesized == false)
+}
+
+@Test func fullscreenIsAskedForByTheEnvironment() {
+    unsetenv("MEAD_FULLSCREEN")
+    #expect(NativeWindow.fullscreenFlag == 0)
+    setenv("MEAD_FULLSCREEN", "1", 1)
+    #expect(NativeWindow.fullscreenFlag == MEAD_SDL_WINDOW_FULLSCREEN)
+    setenv("MEAD_FULLSCREEN", "0", 1)
+    #expect(NativeWindow.fullscreenFlag == 0)
+    unsetenv("MEAD_FULLSCREEN")
 }
 
 @Test func aNativeMethodIsKnownOnceRegistered() {
