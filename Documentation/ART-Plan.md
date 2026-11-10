@@ -312,12 +312,20 @@ How the graphics stack is built, as of the work so far:
   Mead registers when a program has the class. `Tests/ART/WindowCheck.java`
   draws both ways and reads the frames back through `MEAD_FRAME_DUMP`; it
   passes on the Duet's GNOME (Wayland) session.
+- **Text**: Android 10's 249 system fonts (74 MB, CJK and emoji included)
+  and `fonts.xml` are installed in `ANDROID_ROOT/fonts` and
+  `ANDROID_ROOT/etc`. The framework reads them as `/system/fonts` and
+  `/system/etc/fonts.xml`, written into its Java: the core library's file
+  natives (libcore's `Linux` and OpenJDK's `File`) take `/system` paths as
+  paths in `ANDROID_ROOT`, which covers every other `/system` path the
+  framework reads too. Mead's ART startup initializes `Typeface`, as the
+  zygote's preloading does, since hwui's default typeface comes from its
+  initializer. `Tests/ART/TextCheck.java` (typefaces, measuring, drawing,
+  CJK and emoji fallback, `StaticLayout`) passes on the Duet, and the window
+  check draws text through hwui's GL pipeline.
 
 Still to come in phase 4:
 
-- **System fonts**: `Typeface` reads `/system/etc/fonts.xml` and
-  `/system/fonts`, so text needs Android's fonts under `ANDROID_ROOT` and
-  those paths mapped there.
 - **TextureView**: libgui's `BufferQueue`, in-process.
 - Input, `Choreographer` and audio, as listed above.
 
