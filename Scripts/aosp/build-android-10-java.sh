@@ -28,4 +28,13 @@ for module in $modules; do
     [ -n "$jar" ] || { echo "no jar for $module" >&2; exit 1; }
     cp "$jar" "$out/$module.jar"
 done
-ls -l "$out"
+
+# The data the core library reads, from $ANDROID_RUNTIME_ROOT/etc and
+# $ANDROID_TZDATA_ROOT/etc: ICU4J's data (ICU 63) and the time zones.
+mkdir -p "$out/etc/icu" "$out/etc/tz"
+cp external/icu/icu4c/source/stubdata/icudt63l.dat \
+   system/timezone/output_data/icu_overlay/icu_tzdata.dat "$out/etc/icu/"
+cp system/timezone/output_data/iana/tzdata \
+   system/timezone/output_data/version/tz_version \
+   system/timezone/output_data/android/tzlookup.xml "$out/etc/tz/"
+ls -lR "$out"
