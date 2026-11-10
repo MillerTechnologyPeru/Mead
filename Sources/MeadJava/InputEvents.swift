@@ -101,6 +101,12 @@ public final class JavaMotionEvent: JavaObject {
     @JavaMethod("recycle") public func recycle() {}
 
     @JavaMethod("getActionMasked") public func getActionMasked() -> Int32 { action & 0xff }
+
+    /// The device the event came from, when Android lists it (a gamepad);
+    /// Unity's Input System drops an event whose device it can't find.
+    @JavaMethod("getDevice", signature: "()Landroid/view/InputDevice;") public func getDevice() -> JavaInputDevice? {
+        JavaInputDevice.getDevice(deviceId)
+    }
     @JavaMethod("getActionIndex") public func getActionIndex() -> Int32 { (action >> 8) & 0xff }
     @JavaMethod("getX", signature: "()F") public func getX() -> Float { getX(0) }
     @JavaMethod("getX", signature: "(I)F") public func getX(_ index: Int32) -> Float { pointer(index)?.x ?? 0 }
@@ -117,7 +123,9 @@ public final class JavaMotionEvent: JavaObject {
     @JavaMethod("getRawX") public func getRawX(_ index: Int32) -> Float { pointer(index)?.x ?? 0 }
     @JavaMethod("getRawY") public func getRawY(_ index: Int32) -> Float { pointer(index)?.y ?? 0 }
 
-    @JavaMethod("getAxisValue") public func getAxisValue(_ axis: Int32, _ index: Int32) -> Float {
+    @JavaMethod("getAxisValue", signature: "(I)F") public func getAxisValue(_ axis: Int32) -> Float { getAxisValue(axis, 0) }
+
+    @JavaMethod("getAxisValue", signature: "(II)F") public func getAxisValue(_ axis: Int32, _ index: Int32) -> Float {
         guard let pointer = pointer(index) else { return 0 }
         switch axis {
         case Self.axisX: return pointer.x
@@ -183,6 +191,9 @@ public final class JavaKeyEvent: JavaObject {
     @JavaMethod("getAction") public func getAction() -> Int32 { action }
     @JavaMethod("getKeyCode") public func getKeyCode() -> Int32 { keyCode }
     @JavaMethod("isShiftPressed") public func isShiftPressed() -> Bool { metaState & Self.metaShiftOn != 0 }
+    @JavaMethod("getDevice", signature: "()Landroid/view/InputDevice;") public func getDevice() -> JavaInputDevice? {
+        JavaInputDevice.getDevice(deviceId)
+    }
     @JavaMethod("getCharacters") public func getCharacters() -> String? { nil }
     @JavaMethod("getScanCode") public func getScanCode() -> Int32 { scanCode }
     @JavaMethod("getMetaState") public func getMetaState() -> Int32 { metaState }
