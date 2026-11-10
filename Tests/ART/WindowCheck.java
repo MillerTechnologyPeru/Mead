@@ -10,7 +10,7 @@ import mead.view.MeadWindow;
 
 // Android 10 drawing to windows through Mead's display bridge: a Surface
 // for an SDL window, drawn in software (lockCanvas) and by hwui's GL
-// pipeline (lockHardwareCanvas). With MEAD_FRAME_DUMP set, each window's
+// pipeline (lockHardwareCanvas), text included. With MEAD_FRAME_DUMP set, each window's
 // first frame is read back from there and its pixels checked. The first
 // argument, if any, is how many seconds to keep the windows up.
 public class WindowCheck {
@@ -97,6 +97,10 @@ public class WindowCheck {
         paint.setColor(Color.MAGENTA);
         paint.setAntiAlias(true);
         hardwareCanvas.drawCircle(width / 2f, height / 2f, Math.min(width, height) / 4f, paint);
+        Paint text = new Paint(Paint.ANTI_ALIAS_FLAG);
+        text.setColor(Color.BLACK);
+        text.setTextSize(32);
+        hardwareCanvas.drawText("Mead", 10, 40, text);
         hardware.unlockCanvasAndPost(hardwareCanvas);
         if (dump != null) {
             int[][] frame = readFrame(dump, 10000);
@@ -105,6 +109,13 @@ public class WindowCheck {
                 check("hwui frame size", frame[0].length + "x" + frame.length, width + "x" + height);
                 check("hwui corner", hex(frame[5][5]), hex(Color.GREEN));
                 check("hwui centre", hex(frame[height / 2][width / 2]), hex(Color.MAGENTA));
+                int dark = 0;
+                for (int y = 10; y < 44; y++) {
+                    for (int x = 10; x < 90; x++) {
+                        if ((frame[y][x] & 0xFF00) < 0x4000) dark++;
+                    }
+                }
+                check("hwui text", dark > 100, true);
             }
         } else {
             System.out.println("MEAD_FRAME_DUMP isn't set: the frames weren't read back");
