@@ -142,7 +142,7 @@ public enum JavaFramework {
             JavaGameActivity.self, JavaTextInputConnection.self, JavaTextInputState.self, JavaBase64.self, JavaArrays.self,
             JavaX509EncodedKeySpec.self, JavaRSAPublicKey.self, JavaKeyFactory.self, JavaSignature.self,
             JavaHttpClientRequest.self, JavaMotionEvent.self, JavaKeyEvent.self,
-            JavaStringBuilder.self, JavaInputStream.self, JavaAssetInputStream.self, JavaScanner.self, JavaIntent.self,
+            JavaStringBuilder.self, JavaInputStream.self, JavaFileOutputStream.self, JavaAssetInputStream.self, JavaScanner.self, JavaIntent.self,
             JavaProcess.self,
             JavaApplicationInfo.self, JavaEnvironment.self,
             JavaLooper.self, JavaMessage.self, JavaHandler.self, JavaHandlerThread.self, JavaChoreographer.self,
