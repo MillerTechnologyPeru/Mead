@@ -324,10 +324,27 @@ How the graphics stack is built, as of the work so far:
   CJK and emoji fallback, `StaticLayout`) passes on the Duet, and the window
   check draws text through hwui's GL pipeline.
 
+- **Input and vsync**: SDL is all on the bridge's own display thread, which
+  makes the windows and pumps their events, so Java's threads run their
+  loopers; software frames are handed to it. Each window can have an input
+  channel (libinput, AOSP's, with Mead's `mead/input.h` publishing on the
+  server end), whose client end Java reads with an `InputEventReceiver`, as
+  an app's window gets from the window manager. Keys become `KeyEvent`s;
+  the mouse, touches (with multi-touch pointer IDs) and gamepad axes become
+  `MotionEvent`s with Android's sources, actions and axes; gamepad buttons
+  become gamepad `KeyEvent`s. SDL's key mapping now lives in MeadWindow,
+  shared with MeadAndroid. `Choreographer` runs on libgui's vsync through
+  Android's `DisplayEventReceiver` JNI; it asks the display service for the
+  refresh rate, which started phase 5's services early (below). libbinder
+  runs without a binder driver, in-process. `Tests/ART/InputCheck.java`
+  injects keys and touches into SDL's event queue and gets them on a
+  Looper, and counts 30 Choreographer frames at the display's rate (16 ms
+  on the Duet): it passes on the Duet.
+
 Still to come in phase 4:
 
 - **TextureView**: libgui's `BufferQueue`, in-process.
-- Input, `Choreographer` and audio, as listed above.
+- Audio, as listed above.
 
 ### Phase 5: in-process system services (Swift)
 
@@ -346,6 +363,14 @@ mead-framework.jar whose methods are Swift natives:
   notification** (logged), **connectivity**.
 - Content providers within the app; `SharedPreferences`, SQLite and files
   work as on Android, under `~/.mead/apps/<package>`.
+
+Started early, for `Choreographer`: `mead-framework.jar` (`Java/mead-framework`,
+built by `Scripts/build-mead-framework.sh` against Android 10's framework)
+sits beside Mead's providers and is on ART's boot class path after Android's
+jars. `mead.server.MeadServices.start()`, which Mead calls at startup, puts
+the services in `ServiceManager`'s cache, where `getService` finds them
+without a service manager. The first is the display service
+(`IDisplayManager`): one display, the one the bridge describes.
 
 Exit: a small open-source app (from F-Droid) runs, with layouts inflated from
 its resources, AppCompat themes, `RecyclerView` and navigation between
