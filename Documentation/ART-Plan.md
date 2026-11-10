@@ -262,6 +262,29 @@ Swift natives through swift-java, registered over the AOSP C++ ones:
 Exit: a minimal `Activity` with a `View` that draws with `Canvas` and takes
 touches, keys and a gamepad, on both devices.
 
+How the graphics stack is built, as of the work so far:
+
+- **Skia** is Android 10's (`external/skia`), built from its Android
+  target with a Mead configuration (Android's, without RAW, HEIF and PDF),
+  the GL and Vulkan backends, and AOSP's libjpeg-turbo inside it (Debian's
+  and ROCKNIX's libjpeg differ in soname). FreeType, libpng, libwebp,
+  HarfBuzz, Expat and ICU are the distribution's; ROCKNIX has them all with
+  Debian 13's sonames. Done. Built with GCC, Skia's software raster
+  pipeline is scalar (its NEON code is clang-only); building Skia with clang
+  is a later speedup.
+- **minikin** is Android 10's, over the distribution's HarfBuzz and ICU.
+  Done.
+- **libui** stays AOSP's, with its HIDL-generated graphics types carried as
+  generated headers and libhidl's base for them; only `GraphicBuffer`'s
+  gralloc backend is Mead's, backed by memory.
+- **libgui** is Mead's: hwui uses it at exactly the bridge points (`Surface`
+  as the `ANativeWindow` it renders to, `SurfaceComposerClient`'s display
+  info, `DisplayEventReceiver` for vsync). Mead provides those classes under
+  AOSP's names, in C++, over a C interface that the Swift SDL bridge fills
+  in.
+- **hwui** is Android 10's, with the GL and Vulkan pipelines rendering to
+  Mead's `Surface`.
+
 ### Phase 5: in-process system services (Swift)
 
 AOSP's `ActivityThread` drives an app through the system services. Mead
