@@ -184,6 +184,7 @@ final class WindowSession extends WindowSessionBase {
                     surface.height(), state.kind == KIND_POPUP);
             Rect insets = state.attrs.surfaceInsets;
             WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
+            WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
             if (visible != state.visible) WindowManagerService.nativeShowWindow(state.surface, visible);
         }
         state.visible = visible && state.surfaceControl != null;
@@ -251,6 +252,11 @@ final class WindowSession extends WindowSessionBase {
         return surface;
     }
 
+    /** How much a window dims what's under it, as Android's window manager dims it. */
+    private static float dimAmount(WindowState state) {
+        return (state.attrs.flags & WindowManager.LayoutParams.FLAG_DIM_BEHIND) != 0 ? state.attrs.dimAmount : 0;
+    }
+
     /** The window's bridge window, its SurfaceControl, and its input. */
     private boolean create(WindowState state, WindowState parent) {
         CharSequence title = state.attrs.getTitle();
@@ -278,6 +284,7 @@ final class WindowSession extends WindowSessionBase {
         state.surface.copyFrom(surfaceControl);
         Rect insets = state.attrs.surfaceInsets;
         WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
+        WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
         if (state.serverChannel != null) {
             WindowManagerService.nativeAttachInput(state.surface, state.serverChannel);
         }
