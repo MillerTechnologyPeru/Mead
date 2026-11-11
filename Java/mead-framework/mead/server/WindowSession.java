@@ -1,65 +1,134 @@
 package mead.server;
 
+import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.graphics.Region;
 import android.os.IBinder;
+import android.os.RemoteException;
+import android.util.Log;
 import android.util.MergedConfiguration;
 import android.view.DisplayCutout;
+import android.view.Gravity;
 import android.view.IWindow;
 import android.view.InputChannel;
 import android.view.InsetsState;
 import android.view.Surface;
 import android.view.SurfaceControl;
-import android.view.SurfaceSession;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.WindowManagerGlobal;
-import android.content.res.Configuration;
-import java.util.HashMap;
-import java.util.Map;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import mead.server.base.WindowSessionBase;
 
 /**
- * A window session for Mead's window manager: each window added becomes a
- * window of the display bridge's (a SurfaceControl) with an input channel,
- * the size of the app's window, and is shown as it's laid out.
+ * A window session for Mead's window manager. Each window is a window of the
+ * display bridge's, made when it's first laid out visible: an activity's (or
+ * anything filling the app's window) is a top-level window the app window's
+ * size; a dialog is a window its content's size, over its activity's; a
+ * popup or panel (a menu, a dropdown) is a popup in its parent window, where
+ * its gravity and offset put it. Windows hide while invisible. Input goes to
+ * the newest window shown, which has focus; each window's input channel is
+ * opened when it's added, the server end kept here as Android's window
+ * manager keeps it.
  */
 final class WindowSession extends WindowSessionBase {
-    /** A window added: its window's SurfaceControl and size. */
+    private static final String TAG = "MeadWindows";
+
+    /** A window added. */
     private static final class WindowState {
+        final IWindow window;
+        final WindowManager.LayoutParams attrs = new WindowManager.LayoutParams();
+        InputChannel serverChannel;
         SurfaceControl surfaceControl;
+        /** A Surface for the window, which the bridge knows it by. */
+        Surface surface;
+        int kind;
+        int x;
+        int y;
         int width;
         int height;
-        boolean shown;
+        boolean visible;
+        boolean focused;
+
+        WindowState(IWindow window) {
+            this.window = window;
+        }
     }
 
-    private final SurfaceSession mSurfaceSession = new SurfaceSession();
-    private final Map<IBinder, WindowState> mWindows = new HashMap<>();
+    // The bridge's kinds of window (ARTDisplay.WindowKind).
+    private static final int KIND_NORMAL = 0;
+    private static final int KIND_DIALOG = 1;
+    private static final int KIND_POPUP = 2;
+
+    /** The windows, oldest first. */
+    private final List<WindowState> mWindows = new ArrayList<>();
+
+    private WindowState find(IWindow window) {
+        IBinder binder = window.asBinder();
+        for (WindowState state : mWindows) {
+            if (state.window.asBinder() == binder) return state;
+        }
+        return null;
+    }
+
+    private static int appWidth() {
+        MeadApp app = MeadApp.sCurrent;
+        return app != null ? app.width : 1280;
+    }
+
+    private static int appHeight() {
+        MeadApp app = MeadApp.sCurrent;
+        return app != null ? app.height : 720;
+    }
+
+    /** Whether a window fills the app's window. */
+    private static boolean fills(WindowManager.LayoutParams attrs) {
+        return attrs.type == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                || (attrs.width == WindowManager.LayoutParams.MATCH_PARENT
+                        && attrs.height == WindowManager.LayoutParams.MATCH_PARENT);
+    }
+
+    private static boolean isSubWindow(int type) {
+        return type >= WindowManager.LayoutParams.FIRST_SUB_WINDOW
+                && type <= WindowManager.LayoutParams.LAST_SUB_WINDOW;
+    }
+
+    /** The window a window shows over: a sub-window's parent, or a dialog's activity. */
+    private WindowState parentOf(WindowState state) {
+        IBinder token = state.attrs.token;
+        if (token == null) return null;
+        if (isSubWindow(state.attrs.type)) {
+            for (WindowState other : mWindows) {
+                if (other.window.asBinder() == token) return other;
+            }
+        }
+        for (WindowState other : mWindows) {
+            if (other != state && other.attrs.token == token
+                    && other.attrs.type == WindowManager.LayoutParams.TYPE_BASE_APPLICATION) {
+                return other;
+            }
+        }
+        return null;
+    }
 
     @Override
     public int addToDisplay(IWindow window, int seq, WindowManager.LayoutParams attrs, int viewVisibility,
             int displayId, Rect outFrame, Rect outContentInsets, Rect outStableInsets, Rect outOutsets,
             DisplayCutout.ParcelableWrapper outDisplayCutout, InputChannel outInputChannel,
             InsetsState outInsetsState) {
-        MeadApp app = MeadApp.sCurrent;
-        WindowState state = new WindowState();
-        state.width = app != null ? app.width : 1280;
-        state.height = app != null ? app.height : 720;
-        CharSequence title = attrs.getTitle();
-        state.surfaceControl = new SurfaceControl.Builder(mSurfaceSession)
-                .setName(title != null && title.length() > 0 ? title.toString() : "Mead")
-                .setBufferSize(state.width, state.height)
-                .setFormat(attrs.format)
-                .build();
-        synchronized (mWindows) {
-            mWindows.put(window.asBinder(), state);
-        }
+        WindowState state = new WindowState(window);
+        state.attrs.copyFrom(attrs);
+        state.width = fills(attrs) || attrs.width <= 0 ? appWidth() : attrs.width;
+        state.height = fills(attrs) || attrs.height <= 0 ? appHeight() : attrs.height;
         if (outInputChannel != null) {
-            Surface surface = new Surface();
-            surface.copyFrom(state.surfaceControl);
-            InputChannel client = WindowManagerService.nativeOpenInput(surface);
-            surface.release();
-            if (client != null) client.transferTo(outInputChannel);
+            InputChannel[] pair = InputChannel.openInputChannelPair(String.valueOf(attrs.getTitle()));
+            state.serverChannel = pair[0];
+            pair[1].transferTo(outInputChannel);
+        }
+        synchronized (mWindows) {
+            mWindows.add(state);
         }
         frames(state, outFrame, outContentInsets, outStableInsets, outOutsets, outDisplayCutout);
         return WindowManagerGlobal.ADD_OKAY | WindowManagerGlobal.ADD_FLAG_APP_VISIBLE
@@ -78,9 +147,14 @@ final class WindowSession extends WindowSessionBase {
     public void remove(IWindow window) {
         WindowState state;
         synchronized (mWindows) {
-            state = mWindows.remove(window.asBinder());
+            state = find(window);
+            if (state == null) return;
+            mWindows.remove(state);
         }
-        if (state != null) state.surfaceControl.remove();
+        if (state.surfaceControl != null) state.surfaceControl.remove();
+        if (state.surface != null) state.surface.release();
+        if (state.serverChannel != null) state.serverChannel.dispose();
+        updateFocus();
     }
 
     @Override
@@ -92,9 +166,30 @@ final class WindowSession extends WindowSessionBase {
             InsetsState outInsetsState) {
         WindowState state;
         synchronized (mWindows) {
-            state = mWindows.get(window.asBinder());
+            state = find(window);
         }
         if (state == null) return 0;
+        if (attrs != null) state.attrs.copyFrom(attrs);
+        boolean visible = viewVisibility == View.VISIBLE;
+        WindowState parent = parentOf(state);
+        layOut(state, parent, requestedWidth, requestedHeight);
+
+        int result = WindowManagerGlobal.RELAYOUT_RES_IN_TOUCH_MODE;
+        if (visible && state.surfaceControl == null) {
+            if (!create(state, parent)) return result;
+            result |= WindowManagerGlobal.RELAYOUT_RES_FIRST_TIME | WindowManagerGlobal.RELAYOUT_RES_SURFACE_CHANGED;
+        } else if (state.surfaceControl != null) {
+            WindowManagerService.nativeSetWindowFrame(state.surface, state.x, state.y, state.width, state.height,
+                    state.kind == KIND_POPUP);
+            if (visible != state.visible) WindowManagerService.nativeShowWindow(state.surface, visible);
+        }
+        state.visible = visible && state.surfaceControl != null;
+        if (state.visible) {
+            outSurfaceControl.copyFrom(state.surfaceControl);
+        } else {
+            outSurfaceControl.release();
+        }
+
         frames(state, outFrame, outContentInsets, outStableInsets, outOutsets, outCutout);
         outOverscanInsets.setEmpty();
         outVisibleInsets.setEmpty();
@@ -102,25 +197,93 @@ final class WindowSession extends WindowSessionBase {
         MeadApp app = MeadApp.sCurrent;
         Configuration config = app != null ? app.configuration() : new Configuration();
         mergedConfiguration.setConfiguration(config, new Configuration());
-
-        int result = WindowManagerGlobal.RELAYOUT_RES_IN_TOUCH_MODE;
-        if (viewVisibility == View.VISIBLE) {
-            outSurfaceControl.copyFrom(state.surfaceControl);
-            if (!state.shown) {
-                state.shown = true;
-                result |= WindowManagerGlobal.RELAYOUT_RES_FIRST_TIME | WindowManagerGlobal.RELAYOUT_RES_SURFACE_CHANGED;
-                // A window shown has input focus, as Android's window manager
-                // gives the top one: without it, keys aren't delivered.
-                try {
-                    window.windowFocusChanged(true, true);
-                } catch (android.os.RemoteException e) {
-                    // The window is in this process.
-                }
-            }
-        } else {
-            outSurfaceControl.release();
-        }
+        updateFocus();
         return result;
+    }
+
+    /** A window's kind, size and place, from its layout and its content's size. */
+    private void layOut(WindowState state, WindowState parent, int requestedWidth, int requestedHeight) {
+        WindowManager.LayoutParams attrs = state.attrs;
+        // An activity's window, or one with nothing under it, is a window of
+        // its own; one over another, even filling it, is that one's dialog.
+        if (attrs.type == WindowManager.LayoutParams.TYPE_BASE_APPLICATION || parent == null) {
+            state.kind = KIND_NORMAL;
+            state.x = 0;
+            state.y = 0;
+            state.width = appWidth();
+            state.height = appHeight();
+            return;
+        }
+        int parentWidth = parent.width, parentHeight = parent.height;
+        state.width = attrs.width == WindowManager.LayoutParams.MATCH_PARENT ? parentWidth
+                : Math.max(1, Math.min(requestedWidth, parentWidth));
+        state.height = attrs.height == WindowManager.LayoutParams.MATCH_PARENT ? parentHeight
+                : Math.max(1, Math.min(requestedHeight, parentHeight));
+        if (isSubWindow(attrs.type) || attrs.type == WindowManager.LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG) {
+            state.kind = KIND_POPUP;
+            Rect frame = new Rect();
+            Gravity.apply(attrs.gravity, state.width, state.height, new Rect(0, 0, parentWidth, parentHeight),
+                    attrs.x, attrs.y, frame);
+            state.x = frame.left;
+            state.y = frame.top;
+        } else {
+            state.kind = KIND_DIALOG;
+            state.x = 0;
+            state.y = 0;
+        }
+    }
+
+    /** The window's bridge window, its SurfaceControl, and its input. */
+    private boolean create(WindowState state, WindowState parent) {
+        CharSequence title = state.attrs.getTitle();
+        long nativeObject = WindowManagerService.nativeCreateWindow(
+                title != null && title.length() > 0 ? title.toString() : "Mead", state.kind,
+                parent != null ? parent.surface : null, state.x, state.y, state.width, state.height);
+        if (nativeObject == 0) {
+            Log.e(TAG, "The display bridge made no window for " + title);
+            return false;
+        }
+        Log.i(TAG, "Window " + title + " (kind " + state.kind + ") at " + state.x + "," + state.y + ", "
+                + state.width + "×" + state.height + ": " + state.attrs);
+        SurfaceControl surfaceControl = new SurfaceControl();
+        try {
+            Method assign = SurfaceControl.class.getDeclaredMethod("assignNativeObject", long.class);
+            assign.setAccessible(true);
+            assign.invoke(surfaceControl, nativeObject);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("SurfaceControl has no assignNativeObject", e);
+        }
+        state.surfaceControl = surfaceControl;
+        state.surface = new Surface();
+        state.surface.copyFrom(surfaceControl);
+        if (state.serverChannel != null) {
+            WindowManagerService.nativeAttachInput(state.surface, state.serverChannel);
+        }
+        return true;
+    }
+
+    /** Focus to the newest visible window, as Android's window manager gives the top one. */
+    private void updateFocus() {
+        List<WindowState> windows;
+        synchronized (mWindows) {
+            windows = new ArrayList<>(mWindows);
+        }
+        WindowState top = null;
+        for (WindowState state : windows) {
+            if (state.visible && (state.attrs.flags & WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE) == 0) {
+                top = state;
+            }
+        }
+        for (WindowState state : windows) {
+            boolean focused = state == top;
+            if (focused == state.focused) continue;
+            state.focused = focused;
+            try {
+                state.window.windowFocusChanged(focused, true);
+            } catch (RemoteException e) {
+                // The window is in this process.
+            }
+        }
     }
 
     private static void frames(WindowState state, Rect outFrame, Rect outContentInsets, Rect outStableInsets,
@@ -138,8 +301,7 @@ final class WindowSession extends WindowSessionBase {
     @Override public void setTransparentRegion(IWindow window, Region region) {}
     @Override public void setInsets(IWindow window, int touchableInsets, Rect contentInsets, Rect visibleInsets, Region touchableRegion) {}
     @Override public void getDisplayFrame(IWindow window, Rect outDisplayFrame) {
-        MeadApp app = MeadApp.sCurrent;
-        outDisplayFrame.set(0, 0, app != null ? app.width : 1280, app != null ? app.height : 720);
+        outDisplayFrame.set(0, 0, appWidth(), appHeight());
     }
     @Override public void onRectangleOnScreenRequested(IBinder token, Rect rectangle) {}
     @Override public void pokeDrawLock(IBinder window) {}
