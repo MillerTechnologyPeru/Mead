@@ -63,6 +63,9 @@ $common -O1 -shared -Wl,-soname,libfixture_jni.so -o $out/libfixture_jni.so \
     Tests/Fixtures/fixture_jni.c
 $common -shared -Wl,-soname,libfixture_art.so -o $out/libfixture_art.so \
     Tests/Fixtures/fixture_art.c
+# NativeSurfaceCheck's: the NDK's ANativeWindow, EGL and GLES on ART's surfaces.
+$common -shared -Wl,-soname,libfixture_surface.so -o $out/libfixture_surface.so \
+    Tests/Fixtures/fixture_surface.c -landroid -lEGL -lGLESv2
 
 # A real native_app_glue app, its assets, and the library it loads by name.
 mkdir -p $out/app/assets/sub
