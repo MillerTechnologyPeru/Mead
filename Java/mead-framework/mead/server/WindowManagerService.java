@@ -51,7 +51,8 @@ final class WindowManagerService extends WindowManagerBase {
     /**
      * The bridge's next window event, waiting for one: {kind, window ID,
      * width, height}. Kind 1 is a toplevel the compositor resized, to a frame
-     * of width×height pixels.
+     * of width×height pixels; kind 2, one it stopped showing (width 1) or
+     * shows again (width 0).
      */
     static native int[] nativeNextWindowEvent();
 
@@ -67,7 +68,9 @@ final class WindowManagerService extends WindowManagerBase {
                 public void run() {
                     while (true) {
                         int[] event = nativeNextWindowEvent();
-                        if (event != null && event[0] == 1) WindowSession.compositorResized(event[1], event[2], event[3]);
+                        if (event == null) continue;
+                        if (event[0] == 1) WindowSession.compositorResized(event[1], event[2], event[3]);
+                        if (event[0] == 2) WindowSession.compositorHid(event[1], event[2] != 0);
                     }
                 }
             }, "MeadWindowEvents");
