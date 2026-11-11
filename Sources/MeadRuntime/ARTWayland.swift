@@ -81,6 +81,9 @@ final class Wayland {
     private var background: OpaquePointer?
     /// The window whose root surface's frame callbacks are vsync.
     var vsyncWindow: ARTDisplay.Window?
+    /// Mapped popups, oldest first. xdg-shell takes popups down from the
+    /// top, so one under others goes after them.
+    private var popupStack: [ARTDisplay.Window] = []
     /// Whether libgui wants a vsync, and the frame callback asked for it.
     private var vsyncWanted = false
     private var frameCallback: OpaquePointer?
@@ -239,21 +242,18 @@ final class Wayland {
     /// parent's, and the layer over it; mapped once the compositor configures
     /// it. False when the compositor refused.
     func makeSurfaces(for window: ARTDisplay.Window, title: String) -> Bool {
-        guard let root = wl_compositor_create_surface(compositor),
-              let xdgSurface = xdg_wm_base_get_xdg_surface(wmBase, root) else { return false }
+        guard let root = wl_compositor_create_surface(compositor) else { return false }
         window.root = root
-        window.xdgSurface = xdgSurface
         let windowContext = Unmanaged.passUnretained(window).toOpaque()
-        _ = xdg_surface_add_listener(xdgSurface, Self.xdgSurfaceListener, windowContext)
         switch (window.kind, window.parent) {
-        case (.popup, let parent?) where parent.xdgSurface != nil:
-            let positioner = makePositioner(window, in: parent)
-            xdg_positioner_set_constraint_adjustment(positioner,
-                UInt32(XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X.rawValue | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y.rawValue))
-            window.popup = xdg_surface_get_popup(xdgSurface, parent.xdgSurface, positioner)
-            xdg_positioner_destroy(positioner)
-            _ = xdg_popup_add_listener(window.popup, Self.popupListener, windowContext)
+        case (.popup, _?):
+            // A popup's role is made when it's shown, and dropped when it's
+            // hidden (makePopupRole).
+            break
         default:
+            guard let xdgSurface = xdg_wm_base_get_xdg_surface(wmBase, root) else { return false }
+            window.xdgSurface = xdgSurface
+            _ = xdg_surface_add_listener(xdgSurface, Self.xdgSurfaceListener, windowContext)
             let toplevel = xdg_surface_get_toplevel(xdgSurface)
             window.toplevel = toplevel
             _ = xdg_toplevel_add_listener(toplevel, Self.toplevelListener, windowContext)
@@ -278,6 +278,9 @@ final class Wayland {
         wl_subsurface_set_position(window.subsurface, 0, 0)
         wl_subsurface_set_desync(window.subsurface)
         window.layerViewport = wp_viewporter_get_viewport(viewporter, layer)
+        // The layer's buffers are in device pixels, shown at the window's
+        // logical size: EGL's as well as the CPU frames attach gives.
+        wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
         window.eglWindow = wl_egl_window_create(layer, max(window.width, 1), max(window.height, 1))
         windows[root] = window
         windows[layer] = window
@@ -289,6 +292,10 @@ final class Wayland {
     /// compositor's configure, which attaches its background.
     func map(_ window: ARTDisplay.Window) {
         guard let root = window.root, !window.mapped else { return }
+        if window.kind == .popup, window.popup == nil {
+            guard makePopupRole(window) else { return }
+            popupStack.append(window)
+        }
         window.configured = false
         wl_surface_commit(root)
         var waited = 0
@@ -302,12 +309,25 @@ final class Wayland {
         }
     }
 
-    /// Unmaps a window: its root without a buffer, which hides the layer too.
+    /// Unmaps a window: its root without a buffer, which hides the layer
+    /// too; a popup gives up its role, and the popups over it theirs first.
     func unmap(_ window: ARTDisplay.Window) {
         guard let root = window.root, window.mapped else { return }
-        wl_surface_attach(root, nil, 0, 0)
-        wl_surface_commit(root)
-        window.mapped = false
+        if window.popup != nil {
+            takeDownPopup(window)
+        } else {
+            wl_surface_attach(root, nil, 0, 0)
+            wl_surface_commit(root)
+            window.mapped = false
+        }
+        // A hidden window's popups go with it.
+        for popup in popupStack.reversed() where isDescendant(popup, of: window) {
+            takeDownPopup(popup)
+        }
+        windowHidden(window)
+    }
+
+    private func windowHidden(_ window: ARTDisplay.Window) {
         if vsyncWindow === window {
             dropFrameCallback()
             vsyncWindow = bridge.windows.first { $0.mapped }
@@ -372,7 +392,70 @@ final class Wayland {
         return positioner
     }
 
+    /// A popup's role: its xdg_surface and xdg_popup in its parent's, which
+    /// must have its own.
+    private func makePopupRole(_ window: ARTDisplay.Window) -> Bool {
+        guard let root = window.root, let parent = window.parent, let parentSurface = parent.xdgSurface,
+              let xdgSurface = xdg_wm_base_get_xdg_surface(wmBase, root) else { return false }
+        let windowContext = Unmanaged.passUnretained(window).toOpaque()
+        window.xdgSurface = xdgSurface
+        _ = xdg_surface_add_listener(xdgSurface, Self.xdgSurfaceListener, windowContext)
+        let positioner = makePositioner(window, in: parent)
+        xdg_positioner_set_constraint_adjustment(positioner,
+            UInt32(XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X.rawValue | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y.rawValue))
+        window.popup = xdg_surface_get_popup(xdgSurface, parentSurface, positioner)
+        xdg_positioner_destroy(positioner)
+        _ = xdg_popup_add_listener(window.popup, Self.popupListener, windowContext)
+        return true
+    }
+
+    /// Drops a popup's role, unmapping it, after the popups over it: those
+    /// that aren't its own come back once it's gone.
+    private func takeDownPopup(_ window: ARTDisplay.Window) {
+        guard let index = popupStack.firstIndex(where: { $0 === window }) else {
+            dropPopupRole(window)
+            return
+        }
+        let above = Array(popupStack[(index + 1)...])
+        for popup in above.reversed() { dropPopupRole(popup) }
+        dropPopupRole(window)
+        for popup in above where !isDescendant(popup, of: window) {
+            map(popup)
+        }
+    }
+
+    private func dropPopupRole(_ window: ARTDisplay.Window) {
+        popupStack.removeAll { $0 === window }
+        guard let popup = window.popup else { return }
+        // Without a buffer, so the role can be made again.
+        if let root = window.root {
+            wl_surface_attach(root, nil, 0, 0)
+            wl_surface_commit(root)
+        }
+        xdg_popup_destroy(popup)
+        window.popup = nil
+        if let xdgSurface = window.xdgSurface { xdg_surface_destroy(xdgSurface) }
+        window.xdgSurface = nil
+        window.configured = false
+        window.mapped = false
+        windowHidden(window)
+    }
+
+    private func isDescendant(_ window: ARTDisplay.Window, of ancestor: ARTDisplay.Window) -> Bool {
+        var parent = window.parent
+        while let current = parent {
+            if current === ancestor { return true }
+            parent = current.parent
+        }
+        return false
+    }
+
     func destroySurfaces(_ window: ARTDisplay.Window) {
+        // Popups over it, and its own, go first.
+        for popup in popupStack.reversed() where isDescendant(popup, of: window) {
+            takeDownPopup(popup)
+        }
+        if window.popup != nil { takeDownPopup(window) }
         if vsyncWindow === window {
             dropFrameCallback()
             vsyncWindow = nil
