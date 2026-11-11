@@ -10,6 +10,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageParser;
 import android.content.res.Configuration;
 import android.graphics.Rect;
+import android.os.Bundle;
 import android.os.LocaleList;
 import android.os.Process;
 import android.os.SystemProperties;
@@ -27,14 +28,16 @@ import java.util.Map;
  * and its window's size, from which its Configuration comes.
  */
 public final class MeadApp {
-    /** An activity of the app, and the intents it takes. */
+    /** An activity of the app, the intents it takes, and its meta-data. */
     static final class Activity {
         final ActivityInfo info;
         final List<IntentFilter> filters;
+        final Bundle metaData;
 
-        Activity(ActivityInfo info, List<IntentFilter> filters) {
+        Activity(ActivityInfo info, List<IntentFilter> filters, Bundle metaData) {
             this.info = info;
             this.filters = filters;
+            this.metaData = metaData;
         }
     }
 
@@ -78,7 +81,7 @@ public final class MeadApp {
         activity.flags = ActivityInfo.FLAG_HARDWARE_ACCELERATED;
         activity.exported = true;
         activity.enabled = true;
-        mActivities.put(activityName, new Activity(activity, Collections.<IntentFilter>emptyList()));
+        mActivities.put(activityName, new Activity(activity, Collections.<IntentFilter>emptyList(), null));
     }
 
     /** An APK's app, from its manifest. */
@@ -92,7 +95,7 @@ public final class MeadApp {
         String launcher = null;
         for (PackageParser.Activity activity : parsed.activities) {
             List<IntentFilter> filters = new ArrayList<IntentFilter>(activity.intents);
-            mActivities.put(activity.info.name, new Activity(activity.info, filters));
+            mActivities.put(activity.info.name, new Activity(activity.info, filters, activity.metaData));
             if (launcher == null) {
                 for (IntentFilter filter : filters) {
                     if (filter.hasAction(Intent.ACTION_MAIN) && filter.hasCategory(Intent.CATEGORY_LAUNCHER)) {
@@ -168,6 +171,9 @@ public final class MeadApp {
         if (activity == null) return null;
         ActivityInfo info = new ActivityInfo(activity.info);
         info.applicationInfo = application;
+        // Its meta-data, as GET_META_DATA gives it: AppCompat finds an
+        // activity's parent there (android.support.PARENT_ACTIVITY).
+        info.metaData = activity.metaData;
         if (info.processName == null) info.processName = application.processName;
         return info;
     }
