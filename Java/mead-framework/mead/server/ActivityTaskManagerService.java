@@ -56,6 +56,8 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
         boolean finishing;
         boolean paused;
         boolean stopped;
+        /** Stopped because the compositor stopped showing its window. */
+        boolean hidden;
 
         ActivityRecord(ActivityInfo info, Intent intent, ActivityRecord resultTo, String resultWho, int requestCode) {
             this.info = info;
@@ -132,6 +134,33 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
 
     private void destroy(ActivityRecord record) {
         schedule(record, null, DestroyActivityItem.obtain(true, 0));
+    }
+
+    /**
+     * The compositor stopped showing the window of the activity with this
+     * token (minimized, covered, the screen off), or shows it again. The top
+     * activity is stopped, through onPause, as Android stops it with the
+     * display off, and resumed, through onRestart and onStart, when it shows:
+     * a game stops drawing to a window no one sees. MEAD_STOP_HIDDEN=0 keeps
+     * activities resumed, for checks run with the screen off.
+     */
+    void compositorHid(IBinder token, boolean hidden) {
+        if ("0".equals(System.getenv("MEAD_STOP_HIDDEN"))) return;
+        synchronized (this) {
+            ActivityRecord record = find(token);
+            if (record == null || record.finishing || record != top() || mPendingLaunch != null) return;
+            if (hidden && !record.stopped) {
+                Log.i(TAG, "Stopping " + record.info.name + ": the compositor hid its window");
+                record.hidden = true;
+                record.paused = true;
+                record.stopped = true;
+                schedule(record, null, StopActivityItem.obtain(false, 0));
+            } else if (!hidden && record.hidden) {
+                Log.i(TAG, "Resuming " + record.info.name + ": the compositor shows its window");
+                record.hidden = false;
+                resume(record);
+            }
+        }
     }
 
     @Override
