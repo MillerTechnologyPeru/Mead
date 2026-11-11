@@ -2,7 +2,7 @@
 #define MEAD_WAYLAND_H
 
 // Wayland for ART's display bridge (Sources/MeadRuntime): libwayland-client,
-// libwayland-egl and the protocols' glue that wayland-scanner generated
+// libwayland-egl, libwayland-cursor and the protocols' glue that wayland-scanner generated
 // (Scripts/generate-wayland-protocols.sh).
 
 #include <sys/syscall.h>
@@ -10,6 +10,7 @@
 
 #include <wayland-client.h>
 #include <wayland-egl.h>
+#include <wayland-cursor.h>
 
 #include "xdg-shell-client-protocol.h"
 #include "viewporter-client-protocol.h"
