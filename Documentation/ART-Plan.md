@@ -497,8 +497,11 @@ Order:
    Windows' roots hold a clear buffer, so translucent windows (popups'
    shadows, dialogs' scrims) show what's under them; popups get their role
    only while shown and are taken down from the top, as xdg-shell requires.
-   Seen right on the Duet's screen in Loop (2026-11-11). Remaining: the dim
-   behind dialogs (FLAG_DIM_BEHIND), which Android's window manager draws.
+   Seen right on the Duet's screen in Loop (2026-11-11). Dialogs with
+   FLAG_DIM_BEHIND dim the window under them: a subsurface over its content,
+   black at the dialog's dimAmount, with no input region (DialogCheck; seen
+   on the Duet). The ← up arrow works: activities get their manifest
+   meta-data, and up-navigation matches an alias's target.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
