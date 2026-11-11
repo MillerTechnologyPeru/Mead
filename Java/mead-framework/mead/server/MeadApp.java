@@ -12,6 +12,7 @@ import android.content.res.Configuration;
 import android.graphics.Rect;
 import android.os.LocaleList;
 import android.os.Process;
+import android.os.SystemProperties;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -110,13 +111,22 @@ public final class MeadApp {
      * activity. The app's code is the class path's first entry: an APK
      * (arguments: the window's width and height), or a dex (arguments: the
      * package, the activity's class, and the window's width and height). The
-     * window is 1280×720 when its size isn't given. Doesn't return.
+     * window is 1280×720 when its size isn't given. MEAD_PROPERTIES sets
+     * system properties first ("debug.hwui.profile=true;key=value"), as
+     * setprop would. Doesn't return.
      */
     public static void main(String[] args) throws Exception {
+        String properties = System.getenv("MEAD_PROPERTIES");
+        if (properties != null) {
+            for (String property : properties.split(";")) {
+                int equals = property.indexOf('=');
+                if (equals > 0) SystemProperties.set(property.substring(0, equals), property.substring(equals + 1));
+            }
+        }
         String sourcePath = new File(System.getProperty("java.class.path").split(":")[0]).getAbsolutePath();
         if (sourcePath.endsWith(".apk")) {
-            int width = args.length >= 2 ? Integer.parseInt(args[0]) : 1280;
-            int height = args.length >= 2 ? Integer.parseInt(args[1]) : 720;
+            int width = pixels(args.length >= 2 ? Integer.parseInt(args[0]) : 1280);
+            int height = pixels(args.length >= 2 ? Integer.parseInt(args[1]) : 720);
             PackageParser.Package parsed = new PackageParser().parsePackage(new File(sourcePath), 0);
             sCurrent = new MeadApp(parsed, sourcePath, width, height);
         } else {
@@ -124,8 +134,8 @@ public final class MeadApp {
                 throw new IllegalArgumentException(
                         "usage: mead.server.MeadApp [width height] for an APK, or <package> <activity> [width height]");
             }
-            int width = args.length > 3 ? Integer.parseInt(args[2]) : 1280;
-            int height = args.length > 3 ? Integer.parseInt(args[3]) : 720;
+            int width = pixels(args.length > 3 ? Integer.parseInt(args[2]) : 1280);
+            int height = pixels(args.length > 3 ? Integer.parseInt(args[3]) : 720);
             sCurrent = new MeadApp(args[0], args[1], sourcePath, width, height);
         }
         ActivityThread.main(new String[0]);
@@ -196,6 +206,15 @@ public final class MeadApp {
             }
         }
         return null;
+    }
+
+    /**
+     * A size given in the desktop's logical pixels (the window's size on the
+     * command line), in the display's pixels: twice as many on a display
+     * scaled twice, whose density is twice too.
+     */
+    private static int pixels(int logical) {
+        return Math.round(logical * DisplayManagerService.density());
     }
 
     /** The app's configuration: its window's size, on the display's density. */
