@@ -341,6 +341,17 @@ How the graphics stack is built, as of the work so far:
   Looper, and counts 30 Choreographer frames at the display's rate (16 ms
   on the Duet): it passes on the Duet.
 
+- **The exit check, on the Duet**: `Tests/ART/mead/check/ActivityCheck.java`
+  is an `Activity`, run as Android runs one: `mead --dex activity-check.jar
+  mead.server.MeadApp mead.check mead.check.ActivityCheck 640 480` calls
+  `ActivityThread.main`, which attaches to Mead's activity manager, which
+  binds the app and launches the activity through a client transaction.
+  Its window goes through Mead's window manager, whose `SurfaceControl` is a
+  display bridge window (libgui's window callbacks) with an input channel;
+  `ViewRootImpl` draws with hwui and takes input as on Android. Its `View`
+  draws with `Canvas` and gets a touch, a key and a gamepad button. It
+  passes, with the first frame read back. The Retroid is untried.
+
 Still to come in phase 4:
 
 - **TextureView**: libgui's `BufferQueue`, in-process.
@@ -364,13 +375,24 @@ mead-framework.jar whose methods are Swift natives:
 - Content providers within the app; `SharedPreferences`, SQLite and files
   work as on Android, under `~/.mead/apps/<package>`.
 
-Started early, for `Choreographer`: `mead-framework.jar` (`Java/mead-framework`,
+Started early, for `Choreographer` and phase 4's exit check: `mead-framework.jar` (`Java/mead-framework`,
 built by `Scripts/build-mead-framework.sh` against Android 10's framework)
 sits beside Mead's providers and is on ART's boot class path after Android's
 jars. `mead.server.MeadServices.start()`, which Mead calls at startup, puts
 the services in `ServiceManager`'s cache, where `getService` finds them
-without a service manager. The first is the display service
-(`IDisplayManager`): one display, the one the bridge describes.
+without a service manager. `ServiceManager` is given Mead's own service
+manager (`ServiceManagerService`), since there's no binder driver; binder
+calls without one fail as to a dead process, which `ServiceManager` takes
+as no service. The services so far: display (the one display the bridge
+describes), activity (binds the one app, launches its activity, hands out
+the settings provider), activity task, window (window sessions whose
+windows are the bridge's), input method (nothing to bind), package (the one
+app, every permission granted, a touchscreen, keys and gamepads), app ops
+(everything allowed) and input (the bridge's devices, with Android's
+`Generic.kcm` and `Virtual.kcm`). Their bases are generated from the
+framework's AIDL interfaces (`Scripts/generate-service-bases.py`): every
+method answers as a service that doesn't do it would, and says so once in
+the log. `mead.server.MeadApp` runs an app's activity, as above.
 
 Exit: a small open-source app (from F-Droid) runs, with layouts inflated from
 its resources, AppCompat themes, `RecyclerView` and navigation between
