@@ -22,6 +22,7 @@ INTERFACES = [
     ("com.android.internal.view.IInputMethodManager", "InputMethodManagerBase"),
     ("com.android.internal.app.IAppOpsService", "AppOpsServiceBase"),
     ("android.hardware.input.IInputManager", "InputManagerBase"),
+    ("android.media.IAudioService", "AudioServiceBase"),
 ]
 
 METHOD = re.compile(r"^\s*public abstract (.+?) (\w+)\((.*)\)( throws [\w.$, ]+)?;$")
