@@ -467,9 +467,9 @@ Order:
    asks for a frame callback on the window's root. When the compositor
    holds callbacks back, with no window mapped or the screen off, the
    vsync comes anyway after 100 ms, so Choreographer slows but never
-   stalls. The window, activity, graphics, text and audio checks pass; the
-   input check's events pass. Its 30 frames at the display's rate are
-   still unverified, because the Duet's screen was off (10 Hz fallback).
+   stalls. The window, input, activity, graphics, text and audio checks
+   pass; with the screen on, the input check's 30 frames come at the
+   display's 16 ms (with it off, at the 100 ms fallback).
    Missing: decorations on GNOME (no libdecor yet, so Mutter shows none),
    key repeat, the cursor.
 2. The seat: keys through `Generic.kl`, the pointer, touch. Done with step
