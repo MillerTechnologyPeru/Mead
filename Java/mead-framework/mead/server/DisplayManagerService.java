@@ -27,6 +27,11 @@ final class DisplayManagerService extends IDisplayManager.Stub {
     /** The display: width, height, xdpi, ydpi, refresh rate and density (1 at 160 dpi). */
     private static native float[] nativeGetDisplay();
 
+    /** The display's density: 1 at 160 dpi. */
+    static float density() {
+        return nativeGetDisplay()[5];
+    }
+
     @Override
     public DisplayInfo getDisplayInfo(int displayId) {
         if (displayId != Display.DEFAULT_DISPLAY) return null;
