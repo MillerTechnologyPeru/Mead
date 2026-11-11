@@ -49,6 +49,11 @@ final class WindowSession extends WindowSessionBase {
         int y;
         int width;
         int height;
+        /** A toplevel's frame size as the compositor set it, 0 until it does. */
+        int compositorWidth;
+        int compositorHeight;
+        /** Its window's ID with the bridge. */
+        int bridgeId;
         boolean visible;
         boolean focused;
 
@@ -64,6 +69,75 @@ final class WindowSession extends WindowSessionBase {
 
     /** The windows, oldest first. */
     private final List<WindowState> mWindows = new ArrayList<>();
+
+    /** Every session: the process's windows, for the bridge's events. */
+    private static final List<WindowSession> sSessions = new ArrayList<>();
+
+    WindowSession() {
+        synchronized (sSessions) {
+            sSessions.add(this);
+        }
+    }
+
+    /** The window states of every session, as they are now. */
+    private static List<WindowState> allWindows() {
+        List<WindowState> all = new ArrayList<>();
+        synchronized (sSessions) {
+            for (WindowSession session : sSessions) {
+                synchronized (session.mWindows) {
+                    all.addAll(session.mWindows);
+                }
+            }
+        }
+        return all;
+    }
+
+    /**
+     * The compositor resized a toplevel (maximized it, or the user dragged
+     * its edge): its window is told its new frame, as Android's window
+     * manager tells it, and lays itself out again.
+     */
+    static void compositorResized(int bridgeId, int width, int height) {
+        for (WindowState state : allWindows()) {
+            if (state.bridgeId != bridgeId) continue;
+            state.compositorWidth = width;
+            state.compositorHeight = height;
+            Rect frame = new Rect(0, 0, width, height);
+            MeadApp app = MeadApp.sCurrent;
+            Configuration config = app != null ? app.configuration() : new Configuration();
+            try {
+                state.window.resized(frame, new Rect(), new Rect(), new Rect(), new Rect(), new Rect(), false,
+                        new MergedConfiguration(config, new Configuration()), frame, true, false,
+                        android.view.Display.DEFAULT_DISPLAY, new DisplayCutout.ParcelableWrapper(DisplayCutout.NO_CUTOUT));
+            } catch (RemoteException e) {
+                // The window is in this process.
+            }
+        }
+    }
+
+    /** Maximizes the activity's window with this token, or restores it (the caption's button). */
+    static void toggleMaximized(IBinder token) {
+        for (WindowState state : allWindows()) {
+            if (state.attrs.token == token && state.kind == KIND_NORMAL && state.surface != null) {
+                WindowManagerService.nativeToggleMaximized(state.surface);
+                return;
+            }
+        }
+    }
+
+    @Override
+    public boolean startMovingTask(IWindow window, float startX, float startY) {
+        WindowState state;
+        synchronized (mWindows) {
+            state = find(window);
+        }
+        if (state == null || state.surface == null) return false;
+        WindowManagerService.nativeStartMove(state.surface);
+        return true;
+    }
+
+    @Override
+    public void finishMovingTask(IWindow window) {}
 
     private WindowState find(IWindow window) {
         IBinder binder = window.asBinder();
@@ -183,7 +257,8 @@ final class WindowSession extends WindowSessionBase {
             WindowManagerService.nativeSetWindowFrame(state.surface, surface.left, surface.top, surface.width(),
                     surface.height(), state.kind == KIND_POPUP);
             Rect insets = state.attrs.surfaceInsets;
-            WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
+            WindowManagerService.nativeSetFrameInSurface(state.surface, insets.left, insets.top, state.width,
+                    state.height);
             WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
             if (visible != state.visible) WindowManagerService.nativeShowWindow(state.surface, visible);
         }
@@ -214,8 +289,10 @@ final class WindowSession extends WindowSessionBase {
             state.kind = KIND_NORMAL;
             state.x = 0;
             state.y = 0;
-            state.width = appWidth();
-            state.height = appHeight();
+            // The compositor's size once it has given one (maximized,
+            // resized), else the app's.
+            state.width = state.compositorWidth > 0 ? state.compositorWidth : appWidth();
+            state.height = state.compositorHeight > 0 ? state.compositorHeight : appHeight();
             return;
         }
         int parentWidth = parent.width, parentHeight = parent.height;
@@ -283,8 +360,10 @@ final class WindowSession extends WindowSessionBase {
         state.surface = new Surface();
         state.surface.copyFrom(surfaceControl);
         Rect insets = state.attrs.surfaceInsets;
-        WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
+        WindowManagerService.nativeSetFrameInSurface(state.surface, insets.left, insets.top, state.width,
+                state.height);
         WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
+        state.bridgeId = WindowManagerService.nativeWindowId(state.surface);
         if (state.serverChannel != null) {
             WindowManagerService.nativeAttachInput(state.surface, state.serverChannel);
         }
