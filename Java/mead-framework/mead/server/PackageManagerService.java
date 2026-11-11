@@ -1,12 +1,15 @@
 package mead.server;
 
 import android.content.ComponentName;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.FeatureInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ParceledListSlice;
+import android.content.pm.ResolveInfo;
 import android.os.Process;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -47,7 +50,12 @@ final class PackageManagerService extends PackageManagerBase {
         info.versionName = "1";
         info.setLongVersionCode(1);
         if ((flags & PackageManager.GET_ACTIVITIES) != 0) {
-            info.activities = new ActivityInfo[] {app.activityInfo(info.applicationInfo)};
+            info.activities = app.activityInfos(info.applicationInfo).toArray(new ActivityInfo[0]);
+        }
+        if ((flags & PackageManager.GET_PERMISSIONS) != 0 && !app.requestedPermissions.isEmpty()) {
+            info.requestedPermissions = app.requestedPermissions.toArray(new String[0]);
+            info.requestedPermissionsFlags = new int[info.requestedPermissions.length];
+            Arrays.fill(info.requestedPermissionsFlags, PackageInfo.REQUESTED_PERMISSION_GRANTED);
         }
         return info;
     }
@@ -66,8 +74,26 @@ final class PackageManagerService extends PackageManagerBase {
     @Override
     public ActivityInfo getActivityInfo(ComponentName component, int flags, int userId) {
         MeadApp app = app(component.getPackageName());
-        if (app == null || !app.activityName.equals(component.getClassName())) return null;
-        return app.activityInfo(app.applicationInfo());
+        return app != null ? app.activityInfo(component.getClassName(), app.applicationInfo()) : null;
+    }
+
+    @Override
+    public ResolveInfo resolveIntent(Intent intent, String resolvedType, int flags, int userId) {
+        MeadApp app = MeadApp.sCurrent;
+        ActivityInfo activity = app != null ? app.resolveActivity(intent, resolvedType) : null;
+        if (activity == null) return null;
+        ResolveInfo info = new ResolveInfo();
+        info.activityInfo = activity;
+        info.match = IntentFilter.MATCH_CATEGORY_EMPTY;
+        return info;
+    }
+
+    @Override
+    public ParceledListSlice queryIntentActivities(Intent intent, String resolvedType, int flags, int userId) {
+        ResolveInfo info = resolveIntent(intent, resolvedType, flags, userId);
+        List<ResolveInfo> infos = new ArrayList<>();
+        if (info != null) infos.add(info);
+        return new ParceledListSlice<>(infos);
     }
 
     @Override
