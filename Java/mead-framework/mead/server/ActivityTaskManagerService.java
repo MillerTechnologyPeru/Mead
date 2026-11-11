@@ -341,7 +341,10 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
             if (index < 0) return false;
             int target = -1;
             for (int i = index - 1; i >= 0; i--) {
-                if (destination == null || mStack.get(i).info.name.equals(destination.getClassName())) {
+                // An alias's activity answers to its target's name too.
+                ActivityInfo info = mStack.get(i).info;
+                String name = destination != null ? destination.getClassName() : null;
+                if (name == null || info.name.equals(name) || name.equals(info.targetActivity)) {
                     target = i;
                     break;
                 }
