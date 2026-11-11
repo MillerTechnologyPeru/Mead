@@ -8,7 +8,8 @@ internal import SwiftJavaJNICore
 extension ARTDisplay {
     typealias Env = UnsafeMutablePointer<JNIEnv?>
 
-    /// Registers `mead.view.MeadWindow`'s natives, when the app has the class.
+    /// Registers `mead.view.MeadWindow`'s natives, when mead-framework is on
+    /// the boot class path.
     func registerNatives(env: JNIEnvironment) {
         guard let jni = env.pointee?.pointee else { return }
         guard let type = jni.FindClass(env, "mead/view/MeadWindow") else {
@@ -32,10 +33,12 @@ extension ARTDisplay {
         let openInput: OpenInput = { env, _, surface in
             ARTDisplay.shared?.openInput(env: env, surface: surface)
         }
-        // A key as SDL would report it for the window: through the same
-        // translation as the keyboard's.
+        // A key as SDL would report it for the window (or, with no Surface,
+        // the window input goes to): through the same translation as the
+        // keyboard's.
         let injectKey: InjectKey = { env, _, surface, scancode, down in
-            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            guard let display = ARTDisplay.shared,
+                  let window = surface == nil ? display.inputWindow : display.window(env: env, surface: surface) else { return }
             var event = mead_sdl_event()
             event.key.type = UInt32(down != 0 ? MEAD_SDL_EVENT_KEY_DOWN : MEAD_SDL_EVENT_KEY_UP)
             event.key.windowID = window.id
@@ -46,7 +49,8 @@ extension ARTDisplay {
         // A touch as SDL would report it for the window, at a position from 0
         // to 1 across it: 0 down, 1 up, 2 moved.
         let injectTouch: InjectTouch = { env, _, surface, action, x, y in
-            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            guard let display = ARTDisplay.shared,
+                  let window = surface == nil ? display.inputWindow : display.window(env: env, surface: surface) else { return }
             var event = mead_sdl_event()
             let types = [MEAD_SDL_EVENT_FINGER_DOWN, MEAD_SDL_EVENT_FINGER_UP, MEAD_SDL_EVENT_FINGER_MOTION]
             guard action >= 0, Int(action) < types.count else { return }
@@ -60,11 +64,23 @@ extension ARTDisplay {
             _ = SDL.pushEvent(&event)
         }
 
+        // A gamepad button as SDL would report it for the first gamepad.
+        typealias InjectGamepadButton = @convention(c) (Env?, jclass?, jint, jboolean) -> Void
+        let injectGamepadButton: InjectGamepadButton = { _, _, button, down in
+            var event = mead_sdl_event()
+            event.gbutton.type = UInt32(down != 0 ? MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN : MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP)
+            event.gbutton.which = 0
+            event.gbutton.button = UInt8(truncatingIfNeeded: button)
+            event.gbutton.down = down != 0
+            _ = SDL.pushEvent(&event)
+        }
+
         let natives: [(String, String, UnsafeMutableRawPointer)] = [
             ("create", "(Ljava/lang/String;II)Landroid/view/Surface;", unsafeBitCast(create, to: UnsafeMutableRawPointer.self)),
             ("openInput", "(Landroid/view/Surface;)Landroid/view/InputChannel;", unsafeBitCast(openInput, to: UnsafeMutableRawPointer.self)),
             ("injectKey", "(Landroid/view/Surface;IZ)V", unsafeBitCast(injectKey, to: UnsafeMutableRawPointer.self)),
             ("injectTouch", "(Landroid/view/Surface;IFF)V", unsafeBitCast(injectTouch, to: UnsafeMutableRawPointer.self)),
+            ("injectGamepadButton", "(IZ)V", unsafeBitCast(injectGamepadButton, to: UnsafeMutableRawPointer.self)),
         ]
         let names = natives.map { strdup($0.0)! }, signatures = natives.map { strdup($0.1)! }
         defer {
