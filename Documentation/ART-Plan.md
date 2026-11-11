@@ -658,11 +658,19 @@ under ART, the one Java's `MessageQueue` polls (libandroid_runtime's
 `mead/looper.h`, as Android's libandroid has it); without ART it's Mead's
 own. Defense Zone 2 HD on ART (the base APK, with its arm64 libraries in
 the app's library directory): `UnityPlayerActivity` runs, its window opens,
-libunity and il2cpp load, and Unity reports the device; then it waits.
-Missing for it: the asset pack split (`UnityDataAssetPack`, which Play
-Core can't fetch without the Play Store) and the clipboard service; the
-NDK's `ANativeWindow` on ART's surfaces is there since (Wayland plan step
-3), not yet tried with it.
+libunity and il2cpp load, and Unity reports the device. Since the NDK's
+`ANativeWindow` on ART's surfaces (Wayland plan step 3) and split APKs
+(MeadApp gives the app the `split_*.apk` files beside its base APK that
+name its package, as `splitSourceDirs`, which `LoadedApk` adds to its
+assets; its install-time asset pack, `UnityDataAssetPack`, is one), its
+scripts run and it draws: its graphics thread renders with EGL to its
+`SurfaceView` (2400×1292) and swaps. Not yet seen on screen: the Duet's
+screen was blanked, so the swap waited for a frame callback. Activities
+aren't paused when the compositor stops showing their windows, as
+Android pauses them with the display off; a game keeps its thread
+waiting instead. Missing for it: the clipboard, connectivity, vibrator
+and sensor services, `AudioSystem`'s natives, and Play Core's asset pack
+service (it reports the packs it can't sync; the pack is there anyway).
 
 ### Phase 7: remove MeadJNI
 
