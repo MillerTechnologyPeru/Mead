@@ -73,11 +73,11 @@ user's Google credentials.
  │ JNI natives:                                                       │
  │   AOSP C++  libandroid_runtime, libandroidfw, libhwui + Skia,      │
  │             libbinder (in-process), libutils, libbase              │
- │   Swift     (swift-java)  SDL surface, display, input, vsync,      │
+ │   Swift     (swift-java)  Wayland surfaces, display, input, vsync, │
  │             audio, system services, runtime hosting                │
  │──────────────────── Mead loader + bionic shims ───────────────────│
  │ App NDK .so ─▶ providers: libandroid, EGL, Vulkan, OpenSL ES, log  │
- │──────────────────────── glibc, SDL3, Mesa ────────────────────────│
+ │───── glibc, Wayland, SDL3 (gamepads, audio), Mesa ────────────────│
  └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -95,7 +95,7 @@ replaces an earlier one, so C++ can be swapped for Swift one class at a time.
 | MeadLoader, MeadLoaderCore | ELF loader for bionic `.so` | Kept. Also the backend for ART's native library loading |
 | CMeadBionic, MeadBionic | bionic over glibc | Kept. Signal handling chains through ART's `libsigchain` |
 | MeadEGL, MeadVulkan, MeadOpenSLES | Providers | Kept |
-| MeadWindow, CMeadWindow | SDL bindings | Kept. The SDL bridge builds on them |
+| MeadWindow, CMeadWindow | SDL bindings | Kept, for gamepads and audio, and for MeadAndroid until phase 7; ART's windows go to Wayland (see "The display bridge on Wayland") |
 | MeadInterface | Loader/provider interface | Kept |
 | MeadAndroid | Runners plus `libandroid` provider | Runners removed. `libandroid` kept, with `ANativeWindow_fromSurface`, `AAssetManager_fromJava` and `AInputQueue` reading the framework's real objects |
 | MeadJNI, CMeadJNI, MeadMacros | Fake JNI runtime | **Removed** |
@@ -369,6 +369,100 @@ Still to come in phase 4:
 - **TextureView**: libgui's `BufferQueue`, in-process.
 - `AudioRecord`, AAudio for NDK code under ART, and `AudioTrack`'s
   marker and period notifications.
+- The display bridge on Wayland, below.
+
+### The display bridge on Wayland
+
+Decided 2026-11-10: ART's windows and surfaces go to Wayland directly, not
+through SDL's video. SDL stays for gamepads (its gamepad subsystem and
+mapping database, with no SDL video) and audio; MeadAndroid, the current
+runtime, keeps SDL's windows until phase 7 removes it.
+
+Why: Android's display is a compositor with layers, buffer queues and
+transactions, which is Wayland's model; SDL gives one window with one
+surface. On SDL, an `ANativeWindow`'s buffer geometry, scaling and
+transform can't be honoured, CPU frames are copied twice, `SurfaceView`'s
+child surfaces have nowhere to go, vsync is a timer, and a game's EGL can
+meet SDL's own drawing on the same `wl_surface`. Both targets are Wayland:
+Mutter on Debian 13 GNOME, sway on ROCKNIX.
+
+How Android maps onto Wayland:
+
+| Android | Wayland |
+|---|---|
+| SurfaceFlinger layer, `SurfaceControl` | `wl_surface`, `wl_subsurface` |
+| `SurfaceControl` transactions, applied atomically | subsurface position and stacking, applied together by synchronized commits |
+| `BufferQueue`, buffers coming back when released | `wl_buffer` attach and commit, release events |
+| memfd gralloc buffers (Mead's today) | `wl_shm`, without a copy |
+| GPU gralloc buffers, `AHardwareBuffer` | `zwp_linux_dmabuf_v1`, with GBM-backed gralloc |
+| fences | explicit synchronization, DRM sync objects |
+| Choreographer's vsync | `wl_surface.frame`, `wp_presentation` timestamps |
+| buffer geometry, scaling mode, transform | `wp_viewporter`, `set_buffer_transform` |
+| density | `wp_fractional_scale` |
+| activity windows | `xdg_toplevel` |
+| popups, menus, dropdowns | `xdg_popup` |
+| `SurfaceView` | a subsurface of its window |
+| display info | `wl_output` |
+| `FLAG_KEEP_SCREEN_ON` | `zwp_idle_inhibit` |
+| fullscreen, immersive mode | `xdg_toplevel.set_fullscreen` |
+| input method | `zwp_text_input_v3` |
+| clipboard | `wl_data_device` |
+| mouse look | relative pointer, pointer constraints |
+
+Keys take Android's own path: Wayland's keyboard events carry Linux evdev
+codes, which Android's `Generic.kl` maps to key codes through libinput's
+`KeyLayoutMap`, as Android's EventHub does, in place of Mead's SDL scancode
+table. Touch is multi-touch natively; the pointer brings buttons and axes.
+
+Who does what:
+
+- **Swift**: the Wayland client, as the display bridge in place of
+  `ARTDisplay`'s SDL video: the registry, `xdg-shell` toplevels with their
+  configures and resizes, a subsurface per libgui surface with its viewport
+  (buffer size and scaling) and transform, CPU frames as `wl_shm` buffers
+  from gralloc's memfds, frame callbacks into `mead_gui_vsync`, outputs
+  into `mead_gui_set_display`, and the seat (xkbcommon, pointer, touch)
+  into input channels. Swift calls the protocols' generated request
+  functions (inline C wrappers it imports) and registers listeners as
+  `@convention(c)` closures. Window resizes, minimizing and restoring go to
+  the window manager service, which tells `ViewRootImpl` (and a
+  `NativeActivity`'s `onNativeWindowResized` and `onNativeWindowDestroyed`).
+- **C**: only `wayland-scanner`'s glue for the protocols, generated at build
+  time from wayland-protocols' XML, in a small target (`CMeadWayland`). The
+  build image needs wayland-scanner and wayland-protocols; at run time,
+  libwayland-client and libxkbcommon, which both targets have.
+- **The fork's C++**: libgui's interface describes layers (parent,
+  position, stacking, buffer size, scaling mode, transform) as well as
+  windows; `Surface::perform` handles `NATIVE_WINDOW_LOCK` and
+  `UNLOCK_AND_POST`, which `ANativeWindow_lock` and `unlockAndPost` send.
+  Later, gralloc allocates GPU buffers through GBM.
+- **The providers' C**: MeadEGL and MeadVulkan take a libgui surface's
+  `wl_egl_window` and `wl_surface` (`MEAD_SURFACE_GET_NATIVE_WINDOW`) on the
+  bridge's `wl_display`, as hwui does.
+
+GPU rendering stays on a `wl_egl_window` per surface: Debian's and ROCKNIX's
+Mesa have no Android EGL platform, so a game's `eglCreateWindowSurface`
+can't render into gralloc buffers as on Android. Rendering into dmabuf
+gralloc buffers is for hwui, `TextureView` and video, later.
+
+Costs: decorations on GNOME come from libdecor, as SDL's do (Mutter draws
+none; sway does). X11 is dropped for ART apps: X11 and Wayland were the
+choice for SDL's windows, and both targets run Wayland; SDL's video could
+stay as an X11 fallback at the cost of two bridges. The Wayland client is
+some two to three thousand lines. Wayland's events and SDL's gamepad events
+run on two threads, or one thread polls both.
+
+Order:
+
+1. The Wayland bridge: toplevels, a subsurface per surface, CPU frames,
+   `wl_egl_window`s for EGL and Vulkan, outputs, frame callbacks. The
+   window, input and activity checks pass on it.
+2. The seat: keys through `Generic.kl`, the pointer, touch.
+3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
+   transforms; `ANativeWindow_lock`.
+4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
+   clipboard.
+5. dmabuf gralloc through GBM.
 
 ### Phase 5: in-process system services (Swift)
 
