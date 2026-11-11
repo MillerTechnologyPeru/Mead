@@ -80,8 +80,9 @@ extension ARTDisplay {
         if !down { window.keyDownTimes[keyCode] = nil }
         // A repeat's first is a long press, as Android's dispatcher marks it.
         let flags: Int32 = repeatCount == 1 ? Android.flagLongPress : 0
-        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, down ? Android.keyDown : Android.keyUp, flags,
-                              keyCode, scanCode, meta, repeatCount ?? (repeating ? 1 : 0), downTime, time)
+        let status = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, down ? Android.keyDown : Android.keyUp,
+                                       flags, keyCode, scanCode, meta, repeatCount ?? (repeating ? 1 : 0), downTime, time)
+        Wayland.trace("sent key \(keyCode) \(down ? "down" : "up") to window \(window.id): \(status)")
     }
 
     /// Whether a key is a modifier, which doesn't repeat: shift, alt,
@@ -136,8 +137,12 @@ extension ARTDisplay {
             }
         }
         let ids = pointers.map(\.id), tools = pointers.map(\.tool)
-        return functions.sendMotion(input, device, source, action, actionButton, 0, 0, buttonState, downTime, Self.now(),
-                                    UInt32(pointers.count), ids, tools, bits, values)
+        let status = functions.sendMotion(input, device, source, action, actionButton, 0, 0, buttonState, downTime, Self.now(),
+                                          UInt32(pointers.count), ids, tools, bits, values)
+        if action != Android.motionHoverMove {
+            Wayland.trace("sent motion \(action) to window \(window.id) at \(values[0]),\(values[1]): \(status)")
+        }
+        return status
     }
 
     private func mousePointer(x: Float, y: Float) -> Pointer {
