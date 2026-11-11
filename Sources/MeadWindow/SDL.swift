@@ -33,6 +33,17 @@ public enum SDL {
     public nonisolated(unsafe) static var getDisplayContentScale: (@convention(c) (UInt32) -> Float)!
     public nonisolated(unsafe) static var registerEvents: (@convention(c) (Int32) -> UInt32)!
     public nonisolated(unsafe) static var getWindowID: (@convention(c) (Pointer?) -> UInt32)!
+    public typealias AudioCallback = @convention(c) (Pointer?, Pointer?, Int32, Int32) -> Void
+    public nonisolated(unsafe) static var openAudioDeviceStream: (@convention(c) (UInt32, UnsafePointer<mead_sdl_audio_spec>?, AudioCallback?, Pointer?) -> Pointer?)!
+    public nonisolated(unsafe) static var putAudioStreamData: (@convention(c) (Pointer?, UnsafeRawPointer?, Int32) -> Bool)!
+    public nonisolated(unsafe) static var getAudioStreamQueued: (@convention(c) (Pointer?) -> Int32)!
+    public nonisolated(unsafe) static var pauseAudioStreamDevice: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var resumeAudioStreamDevice: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var clearAudioStream: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var setAudioStreamGain: (@convention(c) (Pointer?, Float) -> Bool)!
+    public nonisolated(unsafe) static var setAudioStreamFrequencyRatio: (@convention(c) (Pointer?, Float) -> Bool)!
+    public nonisolated(unsafe) static var destroyAudioStream: (@convention(c) (Pointer?) -> Void)!
+    public nonisolated(unsafe) static var getAudioDeviceFormat: (@convention(c) (UInt32, UnsafeMutablePointer<mead_sdl_audio_spec>?, UnsafeMutablePointer<Int32>?) -> Bool)!
 
     public static var lastError: String {
         getError?().map { String(cString: $0) } ?? "SDL is not loaded"
@@ -83,6 +94,16 @@ public enum SDL {
         getDisplayContentScale = bind("SDL_GetDisplayContentScale")
         registerEvents = bind("SDL_RegisterEvents")
         getWindowID = bind("SDL_GetWindowID")
+        openAudioDeviceStream = bind("SDL_OpenAudioDeviceStream")
+        putAudioStreamData = bind("SDL_PutAudioStreamData")
+        getAudioStreamQueued = bind("SDL_GetAudioStreamQueued")
+        pauseAudioStreamDevice = bind("SDL_PauseAudioStreamDevice")
+        resumeAudioStreamDevice = bind("SDL_ResumeAudioStreamDevice")
+        clearAudioStream = bind("SDL_ClearAudioStream")
+        setAudioStreamGain = bind("SDL_SetAudioStreamGain")
+        setAudioStreamFrequencyRatio = bind("SDL_SetAudioStreamFrequencyRatio")
+        destroyAudioStream = bind("SDL_DestroyAudioStream")
+        getAudioDeviceFormat = bind("SDL_GetAudioDeviceFormat")
         return complete
     }
 }
