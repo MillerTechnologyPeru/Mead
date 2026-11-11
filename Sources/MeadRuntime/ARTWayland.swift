@@ -95,6 +95,14 @@ final class Wayland {
     /// once it's overdue, when no window is mapped or the compositor holds
     /// callbacks back (a hidden window), so Choreographer never stalls.
     private var vsyncAskedAt: Int64?
+    /// When the vsync window's frame callback was asked for, while it's
+    /// unanswered. One held back for long means the compositor shows the
+    /// window no more: GNOME holds them while the screen is blanked, which
+    /// isn't xdg_toplevel's suspended state.
+    private var frameAskedAt: Int64?
+    /// How long a frame callback is held back before its window counts as
+    /// hidden, in milliseconds.
+    private static let heldBackLimit: Int64 = 2_000
 
     unowned let bridge: ARTDisplay
 
@@ -179,8 +187,9 @@ final class Wayland {
             shm = bind(mead_wl_shm_interface(), 1)
             _ = wl_shm_add_listener(shm, Self.shmListener, context)
         case "xdg_wm_base":
-            wmBaseVersion = min(version, 3)
-            wmBase = bind(mead_xdg_wm_base_interface(), 3)
+            // 6 for toplevels' suspended state.
+            wmBaseVersion = min(version, 6)
+            wmBase = bind(mead_xdg_wm_base_interface(), 6)
             _ = xdg_wm_base_add_listener(wmBase, Self.wmBaseListener, context)
         case "wp_viewporter": viewporter = bind(mead_wp_viewporter_interface(), 1)
         case "zxdg_decoration_manager_v1": decorations = bind(mead_zxdg_decoration_manager_v1_interface(), 1)
@@ -733,15 +742,20 @@ final class Wayland {
                 guard let data else { return }
                 let window = Unmanaged<ARTDisplay.Window>.fromOpaque(data).takeUnretainedValue()
                 window.pendingSize = (width, height)
-                var maximized = false
+                var maximized = false, suspended = false
                 if let states, let words = states.pointee.data {
                     let count = states.pointee.size / MemoryLayout<UInt32>.size
                     let values = words.bindMemory(to: UInt32.self, capacity: count)
-                    for index in 0..<count where values[index] == UInt32(XDG_TOPLEVEL_STATE_MAXIMIZED.rawValue) {
-                        maximized = true
+                    for index in 0..<count {
+                        if values[index] == UInt32(XDG_TOPLEVEL_STATE_MAXIMIZED.rawValue) { maximized = true }
+                        if values[index] == UInt32(XDG_TOPLEVEL_STATE_SUSPENDED.rawValue) { suspended = true }
                     }
                 }
                 window.maximized = maximized
+                // The compositor shows the window no more (minimized, on
+                // another workspace), or again.
+                window.suspended = suspended
+                ARTDisplay.shared?.wayland?.updateHidden(window)
             },
             close: { data, _ in
                 guard let data else { return }
@@ -838,6 +852,7 @@ final class Wayland {
         guard frameCallback == nil, let window = vsyncWindow, window.mapped, let root = window.root else { return }
         let callback = wl_surface_frame(root)
         frameCallback = callback
+        frameAskedAt = ARTDisplay.now()
         _ = wl_callback_add_listener(callback, Self.frameListener, context)
         // Damaged, so the compositor repaints it and answers.
         wl_surface_damage_buffer(root, 0, 0, 1, 1)
@@ -847,6 +862,40 @@ final class Wayland {
     private func dropFrameCallback() {
         if let frameCallback { wl_callback_destroy(frameCallback) }
         frameCallback = nil
+        frameAskedAt = nil
+        // Its callbacks say nothing of the window from now on.
+        if let window = vsyncWindow, window.heldBack {
+            window.heldBack = false
+            updateHidden(window)
+        }
+    }
+
+    /// Tells the window manager when the compositor stops or starts showing a
+    /// toplevel, by either sign (its suspended state, or its frame callbacks
+    /// held back): Android's window manager stops its activity, as with the
+    /// display off, and resumes it.
+    func updateHidden(_ window: ARTDisplay.Window) {
+        let hidden = window.suspended || window.heldBack
+        guard hidden != window.reportedHidden, window.toplevel != nil else { return }
+        window.reportedHidden = hidden
+        ARTDisplay.report("window \(window.id) \(hidden ? "hidden" : "shown") by the compositor"
+            + (window.suspended ? " (suspended)" : window.heldBack ? " (frames held back)" : ""))
+        bridge.postWindowEvent(kind: 2, window: window, width: hidden ? 1 : 0, height: 0)
+    }
+
+    /// How long the display thread may wait before the vsync window's frame
+    /// callback counts as held back, in milliseconds, marking it hidden if
+    /// it's held back now. Its callback stays asked for, so that its done
+    /// says when the compositor shows it again.
+    func heldBackTimeout() -> Int32? {
+        guard let asked = frameAskedAt, let window = vsyncWindow, !window.heldBack else { return nil }
+        let waited = (ARTDisplay.now() - asked) / 1_000_000
+        if waited >= Self.heldBackLimit {
+            window.heldBack = true
+            updateHidden(window)
+            return nil
+        }
+        return Int32(Self.heldBackLimit - waited)
     }
 
     /// The display has refreshed, or the vsync is overdue.
@@ -879,6 +928,11 @@ final class Wayland {
             guard callback == wayland.frameCallback else { return }
             wl_callback_destroy(callback)
             wayland.frameCallback = nil
+            wayland.frameAskedAt = nil
+            if let window = wayland.vsyncWindow, window.heldBack {
+                window.heldBack = false
+                wayland.updateHidden(window)
+            }
             wayland.deliverVsync()
         }))
         return listener
