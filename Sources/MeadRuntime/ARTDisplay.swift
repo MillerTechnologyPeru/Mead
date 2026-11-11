@@ -151,6 +151,9 @@ final class ARTDisplay {
         // The display thread's input state.
         var keyDownTimes: [Int32: Int64] = [:]
         var mouseButtons: Int32 = 0
+        /// Where the window's frame starts in its surface (its surface
+        /// insets), taken from input's coordinates.
+        var inputOffset: (x: Float, y: Float) = (0, 0)
         var mouseDownTime: Int64 = 0
         var fingers: [(source: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
         var touchDownTime: Int64 = 0
@@ -215,6 +218,9 @@ final class ARTDisplay {
     var scriptStart: Double?
 
     nonisolated(unsafe) static var shared: ARTDisplay?
+    /// The window Android's window manager focused, which gets the keys of
+    /// its toplevel. On the display thread.
+    var androidFocus: Window?
 
     /// The bridge for the libgui and libandroid_runtime installed at `home`,
     /// which ART has loaded.
@@ -477,6 +483,7 @@ final class ARTDisplay {
         pthread_mutex_unlock(&windowsLock)
         guard let window else { return }
         enqueue { [self] in
+            if androidFocus === window { androidFocus = nil }
             window.surface = nil
             wayland?.destroySurfaces(window)
         }
@@ -530,7 +537,7 @@ final class ARTDisplay {
     /// display thread.
     private func describeDisplay() {
         guard let output = wayland?.outputs.first, output.width > 0, output.height > 0 else { return }
-        let scale = Float(max(output.scale, 1))
+        let scale = Float(wayland?.scale ?? 1)
         // Dots per inch from the output's physical size, when it has one.
         func dpi(_ pixels: Int32, _ millimeters: Int32) -> Float {
             millimeters > 0 ? Float(pixels) * 25.4 / Float(millimeters) : 160 * scale
@@ -545,6 +552,7 @@ final class ARTDisplay {
         described[4] = (output.refresh > 0 ? Float(output.refresh) / 1000 : 60).bitPattern
         described[5] = scale.bitPattern
         described.withUnsafeBytes { functions.setDisplay($0.baseAddress!) }
+        Self.report("\(output.width)×\(output.height) pixels, \(output.millimetersWide)×\(output.millimetersHigh) mm, scale \(output.scale), \(wayland?.outputs.count ?? 0) outputs")
     }
 
     /// A window's position (a popup's, in its parent) and size, in pixels.
