@@ -40,6 +40,9 @@ extension ART {
         typealias GetDisplay = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?) -> jfloatArray?
         let getDisplay: GetDisplay = { env, _ in
             guard let env, let jni = env.pointee?.pointee, let array = jni.NewFloatArray(env, 6) else { return nil }
+            // The bridge describes the display when it starts: start it, so
+            // what's asked before the first window is the real display.
+            _ = ARTDisplay.shared?.onDisplayThread {}
             // MeadDisplay: two uint32_t, then four floats.
             var described = [UInt32](repeating: 0, count: 6)
             described.withUnsafeMutableBytes { ART.getDisplay?($0.baseAddress!) }
