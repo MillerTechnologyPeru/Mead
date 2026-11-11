@@ -51,6 +51,7 @@ public final class MeadServices {
         services.put("package", new PackageManagerService());
         services.put(Context.APP_OPS_SERVICE, new AppOpsService());
         services.put(Context.INPUT_SERVICE, new InputManagerService());
+        services.put(Context.AUDIO_SERVICE, new AudioService());
         for (Map.Entry<String, IBinder> service : services.entrySet()) {
             ServiceManager.addService(service.getKey(), service.getValue());
         }
