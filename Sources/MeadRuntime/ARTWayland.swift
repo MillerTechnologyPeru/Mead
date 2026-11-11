@@ -433,16 +433,22 @@ final class Wayland {
     /// compositor resizes it from that edge or corner. False if the press
     /// is the app's.
     private func resizeFromEdge(_ window: ARTDisplay.Window, x: Float, y: Float) -> Bool {
-        guard window.kind == .normal, let seat, let toplevel = window.toplevel, let frame = window.frame,
-              !window.maximized else { return false }
+        guard let seat, let toplevel = window.toplevel, let edges = resizeEdges(window, x: x, y: y) else { return false }
+        xdg_toplevel_resize(toplevel, seat, pressSerial, edges)
+        return true
+    }
+
+    /// The edges a point in a captioned window's shadow resizes; nil inside
+    /// its frame, or for a window that doesn't resize so.
+    private func resizeEdges(_ window: ARTDisplay.Window, x: Float, y: Float) -> UInt32? {
+        guard window.kind == .normal, window.toplevel != nil, let frame = window.frame, !window.maximized,
+              frame.x > 0 || frame.y > 0 else { return nil }
         var edges: UInt32 = 0
         if x < Float(frame.x) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_LEFT.rawValue) }
         if x >= Float(frame.x + frame.width) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_RIGHT.rawValue) }
         if y < Float(frame.y) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_TOP.rawValue) }
         if y >= Float(frame.y + frame.height) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM.rawValue) }
-        guard edges != 0 else { return false }
-        xdg_toplevel_resize(toplevel, seat, pressSerial, edges)
-        return true
+        return edges != 0 ? edges : nil
     }
 
     /// Dims a window while a child of its that dims (a dialog) is mapped, as
@@ -908,36 +914,100 @@ final class Wayland {
 
     // MARK: The cursor
 
-    /// The theme's arrow, at the outputs' largest scale, on its own surface.
-    private func loadCursor() {
-        guard cursorSurface == nil, let shm, let compositor else { return }
+    /// A cursor's image from the theme: its buffer, size and hotspot.
+    private struct CursorImage {
+        let buffer: OpaquePointer
+        let width: Int32
+        let height: Int32
+        let hotspot: (x: Int32, y: Int32)
+    }
+
+    private var cursorImages: [String: CursorImage] = [:]
+    /// The cursor shown, and the serial of the pointer's last enter, which
+    /// setting it takes.
+    private var shownCursor: String?
+    private var enterSerial: UInt32 = 0
+    /// The cursor Android asked for over its views (setPointerIconType).
+    var appCursor = "default"
+
+    /// The cursor theme (XCURSOR_THEME, XCURSOR_SIZE) at the outputs' largest
+    /// scale, and the surface cursors show on.
+    private func loadCursorTheme() -> Bool {
+        if cursorTheme != nil { return true }
+        guard let shm, let compositor else { return false }
         let scale = max(outputs.map(\.scale).max() ?? 1, 1)
         let size = getenv("XCURSOR_SIZE").flatMap { Int32(String(cString: $0)) } ?? 24
         guard let theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"), size * scale, shm) else {
             Self.reportOnce("no cursor theme")
-            return
-        }
-        guard let cursor = wl_cursor_theme_get_cursor(theme, "default") ?? wl_cursor_theme_get_cursor(theme, "left_ptr"),
-              cursor.pointee.image_count > 0, let image = cursor.pointee.images[0],
-              let buffer = wl_cursor_image_get_buffer(image) else {
-            wl_cursor_theme_destroy(theme)
-            Self.reportOnce("no arrow in the cursor theme")
-            return
+            return false
         }
         cursorTheme = theme
-        let surface = wl_compositor_create_surface(compositor)
-        wl_surface_set_buffer_scale(surface, scale)
-        wl_surface_attach(surface, buffer, 0, 0)
-        wl_surface_damage_buffer(surface, 0, 0, Int32(image.pointee.width), Int32(image.pointee.height))
-        wl_surface_commit(surface)
-        cursorSurface = surface
-        cursorHotspot = (Int32(image.pointee.hotspot_x) / scale, Int32(image.pointee.hotspot_y) / scale)
+        cursorSurface = wl_compositor_create_surface(compositor)
+        wl_surface_set_buffer_scale(cursorSurface, scale)
+        return true
     }
 
-    private func showCursor(serial: UInt32) {
-        loadCursor()
-        guard let pointer, let cursorSurface else { return }
-        wl_pointer_set_cursor(pointer, serial, cursorSurface, cursorHotspot.0, cursorHotspot.1)
+    /// A cursor by its CSS name, else the older X11 names themes also use.
+    private func cursorImage(_ name: String) -> CursorImage? {
+        if let image = cursorImages[name] { return image }
+        guard loadCursorTheme(), let theme = cursorTheme else { return nil }
+        let names = [name] + (Self.cursorFallbacks[name] ?? []) + ["default", "left_ptr"]
+        for candidate in names {
+            guard let cursor = wl_cursor_theme_get_cursor(theme, candidate), cursor.pointee.image_count > 0,
+                  let image = cursor.pointee.images[0], let buffer = wl_cursor_image_get_buffer(image) else { continue }
+            let found = CursorImage(buffer: buffer, width: Int32(image.pointee.width), height: Int32(image.pointee.height),
+                                    hotspot: (Int32(image.pointee.hotspot_x), Int32(image.pointee.hotspot_y)))
+            cursorImages[name] = found
+            return found
+        }
+        Self.reportOnce("no \(name) cursor in the cursor theme")
+        return nil
+    }
+
+    private static let cursorFallbacks: [String: [String]] = [
+        "pointer": ["hand2", "hand1"], "text": ["xterm"], "wait": ["watch"], "progress": ["left_ptr_watch"],
+        "help": ["question_arrow"], "crosshair": ["cross"], "not-allowed": ["crossed_circle"],
+        "no-drop": ["crossed_circle"], "grab": ["openhand", "hand1"], "grabbing": ["closedhand", "fleur"],
+        "all-scroll": ["fleur"], "move": ["fleur"], "copy": ["dnd-copy"], "alias": ["dnd-link"],
+        "context-menu": ["left_ptr"], "cell": ["plus"], "vertical-text": ["xterm"],
+        "ew-resize": ["sb_h_double_arrow"], "ns-resize": ["sb_v_double_arrow"],
+        "nesw-resize": ["fd_double_arrow"], "nwse-resize": ["bd_double_arrow"],
+        "n-resize": ["top_side"], "s-resize": ["bottom_side"], "w-resize": ["left_side"], "e-resize": ["right_side"],
+        "nw-resize": ["top_left_corner"], "ne-resize": ["top_right_corner"],
+        "sw-resize": ["bottom_left_corner"], "se-resize": ["bottom_right_corner"],
+        "zoom-in": [], "zoom-out": [],
+    ]
+
+    /// The cursor for where the pointer is: a resize arrow over a captioned
+    /// window's shadow, else Android's.
+    private func cursorName() -> String {
+        if let window = pointerWindow, let edges = resizeEdges(window, x: pointerX, y: pointerY) {
+            let top = edges & UInt32(XDG_TOPLEVEL_RESIZE_EDGE_TOP.rawValue) != 0
+            let bottom = edges & UInt32(XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM.rawValue) != 0
+            let left = edges & UInt32(XDG_TOPLEVEL_RESIZE_EDGE_LEFT.rawValue) != 0
+            let right = edges & UInt32(XDG_TOPLEVEL_RESIZE_EDGE_RIGHT.rawValue) != 0
+            return (top ? "n" : bottom ? "s" : "") + (left ? "w" : right ? "e" : "") + "-resize"
+        }
+        return appCursor
+    }
+
+    /// Shows the cursor for where the pointer is, if it changed.
+    func updateCursor() {
+        guard let pointer, pointerWindow != nil else { return }
+        let name = cursorName()
+        guard name != shownCursor else { return }
+        if name == "none" {
+            wl_pointer_set_cursor(pointer, enterSerial, nil, 0, 0)
+            shownCursor = name
+            return
+        }
+        guard let image = cursorImage(name), let surface = cursorSurface else { return }
+        let scale = max(outputs.map(\.scale).max() ?? 1, 1)
+        wl_surface_attach(surface, image.buffer, 0, 0)
+        wl_surface_damage_buffer(surface, 0, 0, image.width, image.height)
+        wl_surface_commit(surface)
+        wl_pointer_set_cursor(pointer, enterSerial, surface, image.hotspot.x / scale, image.hotspot.y / scale)
+        shownCursor = name
     }
 
     nonisolated(unsafe) private static let pointerListener: UnsafeMutablePointer<wl_pointer_listener> = {
@@ -945,17 +1015,21 @@ final class Wayland {
         listener.initialize(to: wl_pointer_listener(
             enter: { data, _, serial, surface, x, y in
                 guard let wayland = wayland(data), let surface else { return }
-                wayland.showCursor(serial: serial)
                 wayland.pointerWindow = wayland.windows[surface]
                 trace("pointer on window \(wayland.pointerWindow?.id ?? 0)")
                 wayland.pointerX = wayland.pixels(x)
                 wayland.pointerY = wayland.pixels(y)
+                // A new enter: the compositor's cursor until it's set again.
+                wayland.enterSerial = serial
+                wayland.shownCursor = nil
+                wayland.updateCursor()
             },
             leave: { data, _, _, _ in wayland(data)?.pointerWindow = nil },
             motion: { data, _, _, x, y in
                 guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
                 wayland.pointerX = wayland.pixels(x)
                 wayland.pointerY = wayland.pixels(y)
+                wayland.updateCursor()
                 wayland.bridge.pointerMoved(window, x: wayland.pointerX, y: wayland.pointerY)
             },
             button: { data, _, serial, _, button, state in
