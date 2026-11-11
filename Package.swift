@@ -78,7 +78,8 @@ let package = Package(
         .target(
             name: "CMeadWayland",
             exclude: ["GENERATED_FROM"],
-            linkerSettings: [.linkedLibrary("wayland-client"), .linkedLibrary("wayland-egl")]
+            linkerSettings: [.linkedLibrary("wayland-client"), .linkedLibrary("wayland-egl"),
+                             .linkedLibrary("wayland-cursor")]
         ),
         .target(name: "MeadWindow", dependencies: ["CMeadWindow"]),
         // Checking signatures: RSA, SHA-1, SHA-256.
