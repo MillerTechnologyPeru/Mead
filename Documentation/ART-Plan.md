@@ -494,6 +494,11 @@ Order:
    GNOME's 1.25 or 1.5 draws at 2 and is scaled down. Open: Loop's toolbar
    icons don't show until a tap redraws the toolbar, with or without
    Choreographer's vsync, buffer age or today's changes.
+   Windows' roots hold a clear buffer, so translucent windows (popups'
+   shadows, dialogs' scrims) show what's under them; popups get their role
+   only while shown and are taken down from the top, as xdg-shell requires.
+   Seen right on the Duet's screen in Loop (2026-11-11). Remaining: the dim
+   behind dialogs (FLAG_DIM_BEHIND), which Android's window manager draws.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
