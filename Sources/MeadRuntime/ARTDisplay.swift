@@ -126,6 +126,14 @@ final class ARTDisplay {
         var subsurface: OpaquePointer?
         var layerViewport: OpaquePointer?
         var eglWindow: OpaquePointer?
+        /// How much the window dims its parent while it's mapped (Android's
+        /// FLAG_DIM_BEHIND), and the dim layer over this window when one of
+        /// its children dims it.
+        var dimAmount: Float = 0
+        var dim: OpaquePointer?
+        var dimSubsurface: OpaquePointer?
+        var dimViewport: OpaquePointer?
+        var dimShown: Float = 0
         var configured = false
         var mapped = false
         /// The size a toplevel's last configure asked for.
