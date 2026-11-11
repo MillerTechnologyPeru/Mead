@@ -483,6 +483,17 @@ Order:
    scale). Both are built and the checks pass, but they haven't been tried
    with a real keyboard and mouse. Remaining: Android's pointer icons (the
    text beam), animated cursors, scroll's high resolution.
+   Windows draw at the output's scale (2026-11-11): Android's pixels are
+   device pixels, the density is Wayland's scale (`MEAD_DISPLAY_SCALE`
+   overrides it), the size given on the command line is in the desktop's
+   logical pixels, and sizes, popup places and input convert. Windows with
+   surface insets (popups' and dialogs' shadows) get surfaces that big,
+   with input offset back into the frame; popups anchor inside their
+   parents. Keys go to the window Android focused when Wayland's keyboard
+   is on its toplevel. Fractional scales (`wp_fractional_scale_v1`) remain:
+   GNOME's 1.25 or 1.5 draws at 2 and is scaled down. Open: Loop's toolbar
+   icons don't show until a tap redraws the toolbar, with or without
+   Choreographer's vsync, buffer age or today's changes.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
