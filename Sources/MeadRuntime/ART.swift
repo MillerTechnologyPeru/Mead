@@ -154,8 +154,12 @@ public final class ART {
         // an install without one has no windows.
         ARTDisplay.shared = try? ARTDisplay(home: home)
 
-        // The system services, in-process.
+        // The system services, in-process, and mead.view.MeadWindow's natives,
+        // both in mead-framework.
         try startServices()
+        if let display = ARTDisplay.shared {
+            display.registerNatives(env: try virtualMachine.environment())
+        }
     }
 
     /// Android 10's boot class path, in order, as its init.environ.rc has it.
@@ -224,7 +228,6 @@ public final class ART {
         let env = try virtualMachine.environment()
         guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
         let name = String(className.map { $0 == "." ? "/" : $0 })
-        ARTDisplay.shared?.registerNatives(env: env)
         guard let type = jni.FindClass(env, name) else {
             throw Failure("no class \(className)\(describeException(env))")
         }
