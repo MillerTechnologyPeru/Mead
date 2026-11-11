@@ -107,6 +107,8 @@ extension ARTDisplay {
         typealias SetFrame = @convention(c) (Env, jclass?, jobject?, jint, jint, jint, jint, jboolean) -> Void
         typealias Show = @convention(c) (Env, jclass?, jobject?, jboolean) -> Void
         typealias AttachInput = @convention(c) (Env, jclass?, jobject?, jobject?) -> Void
+        typealias SetInputOffset = @convention(c) (Env, jclass?, jobject?, jint, jint) -> Void
+        typealias SetFocus = @convention(c) (Env, jclass?, jobject?) -> Void
 
         // A window, as a SurfaceControl's native object; 0 for none.
         let create: Create = { env, _, title, kind, parent, x, y, width, height in
@@ -135,8 +137,19 @@ extension ARTDisplay {
             guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
             display.attachInput(env: env, window: window, serverChannel: channel)
         }
+        let setInputOffset: SetInputOffset = { env, _, surface, x, y in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.enqueue { window.inputOffset = (Float(x), Float(y)) }
+        }
+        let setFocus: SetFocus = { env, _, surface in
+            guard let display = ARTDisplay.shared else { return }
+            let window = surface.flatMap { display.window(env: env, surface: $0) }
+            display.enqueue { display.androidFocus = window }
+        }
         func pointer<T>(_ function: T) -> UnsafeMutableRawPointer { unsafeBitCast(function, to: UnsafeMutableRawPointer.self) }
         return [
+            ("nativeSetInputOffset", "(Landroid/view/Surface;II)V", pointer(setInputOffset)),
+            ("nativeSetFocus", "(Landroid/view/Surface;)V", pointer(setFocus)),
             ("nativeCreateWindow", "(Ljava/lang/String;ILandroid/view/Surface;IIII)J", pointer(create)),
             ("nativeSetWindowFrame", "(Landroid/view/Surface;IIIIZ)V", pointer(setFrame)),
             ("nativeShowWindow", "(Landroid/view/Surface;Z)V", pointer(show)),
