@@ -55,6 +55,26 @@ final class Wayland {
     var lockedModifiers: UInt32 = 0
     var touchWindows: [Int32: ARTDisplay.Window] = [:]
 
+    /// Key repeat, as the compositor sets it: keys per second (0 is none)
+    /// and the delay before the first, in milliseconds.
+    private var repeatRate: Int32 = 25
+    private var repeatDelay: Int32 = 600
+    /// The held key that repeats, and when it next does.
+    private struct Repeat {
+        let window: ARTDisplay.Window
+        let code: UInt32
+        let keyCode: Int32
+        var count: Int32
+        var next: Int64
+    }
+    private var held: Repeat?
+
+    /// The cursor's theme (XCURSOR_THEME, XCURSOR_SIZE), its image's surface
+    /// and its hotspot, set on the pointer's enter.
+    private var cursorTheme: OpaquePointer?
+    private var cursorSurface: OpaquePointer?
+    private var cursorHotspot: (Int32, Int32) = (0, 0)
+
     /// The windows, by their root and layer surfaces.
     var windows: [OpaquePointer: ARTDisplay.Window] = [:]
     /// A 1×1 black buffer for windows' root surfaces, scaled by viewports.
@@ -559,26 +579,103 @@ final class Wayland {
                 wayland.keyboardWindow = wayland.windows[surface]
                 if let window = wayland.keyboardWindow { wayland.bridge.focusedWindowID = window.id }
             },
-            leave: { data, _, _, _ in wayland(data)?.keyboardWindow = nil },
+            leave: { data, _, _, _ in
+                guard let wayland = wayland(data) else { return }
+                wayland.keyboardWindow = nil
+                wayland.held = nil
+            },
             key: { data, _, _, _, key, state in
                 guard let wayland = wayland(data), let window = wayland.keyboardWindow else { return }
-                wayland.bridge.waylandKey(window, code: key, down: state == UInt32(WL_KEYBOARD_KEY_STATE_PRESSED.rawValue),
-                                          modifiers: wayland.modifiers, locked: wayland.lockedModifiers)
+                wayland.key(window, code: key, down: state == UInt32(WL_KEYBOARD_KEY_STATE_PRESSED.rawValue))
             },
             modifiers: { data, _, _, depressed, latched, locked, _ in
                 guard let wayland = wayland(data) else { return }
                 wayland.modifiers = depressed | latched
                 wayland.lockedModifiers = locked
             },
-            repeat_info: { _, _, _, _ in }))
+            repeat_info: { data, _, rate, delay in
+                guard let wayland = wayland(data) else { return }
+                wayland.repeatRate = max(rate, 0)
+                wayland.repeatDelay = max(delay, 0)
+                if rate <= 0 { wayland.held = nil }
+            }))
         return listener
     }()
+
+    /// A key pressed or released; a pressed key, not a modifier, repeats
+    /// while it's held, as Android's dispatcher repeats them.
+    private func key(_ window: ARTDisplay.Window, code: UInt32, down: Bool) {
+        let keyCode = bridge.waylandKey(window, code: code, down: down, modifiers: modifiers, locked: lockedModifiers)
+        if down {
+            if repeatRate > 0, keyCode != 0, !ARTDisplay.isModifier(keyCode) {
+                held = Repeat(window: window, code: code, keyCode: keyCode, count: 0,
+                              next: ARTDisplay.now() + Int64(repeatDelay) * 1_000_000)
+            }
+        } else if held?.code == code {
+            held = nil
+        }
+    }
+
+    /// Repeats the held key if it's due, and how long the display thread may
+    /// wait for the next, in milliseconds.
+    func repeatTimeout() -> Int32? {
+        guard var repeating = held else { return nil }
+        guard repeating.window === keyboardWindow, repeating.window.input != nil else {
+            held = nil
+            return nil
+        }
+        let now = ARTDisplay.now()
+        if now >= repeating.next {
+            repeating.count += 1
+            // From now, so a stalled thread doesn't send a burst.
+            repeating.next = now + 1_000_000_000 / Int64(max(repeatRate, 1))
+            held = repeating
+            bridge.waylandKey(repeating.window, code: repeating.code, down: true, modifiers: modifiers,
+                              locked: lockedModifiers, repeatCount: repeating.count)
+        }
+        return Int32(max((repeating.next - now) / 1_000_000, 0))
+    }
+
+    // MARK: The cursor
+
+    /// The theme's arrow, at the outputs' largest scale, on its own surface.
+    private func loadCursor() {
+        guard cursorSurface == nil, let shm, let compositor else { return }
+        let scale = max(outputs.map(\.scale).max() ?? 1, 1)
+        let size = getenv("XCURSOR_SIZE").flatMap { Int32(String(cString: $0)) } ?? 24
+        guard let theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"), size * scale, shm) else {
+            Self.reportOnce("no cursor theme")
+            return
+        }
+        guard let cursor = wl_cursor_theme_get_cursor(theme, "default") ?? wl_cursor_theme_get_cursor(theme, "left_ptr"),
+              cursor.pointee.image_count > 0, let image = cursor.pointee.images[0],
+              let buffer = wl_cursor_image_get_buffer(image) else {
+            wl_cursor_theme_destroy(theme)
+            Self.reportOnce("no arrow in the cursor theme")
+            return
+        }
+        cursorTheme = theme
+        let surface = wl_compositor_create_surface(compositor)
+        wl_surface_set_buffer_scale(surface, scale)
+        wl_surface_attach(surface, buffer, 0, 0)
+        wl_surface_damage_buffer(surface, 0, 0, Int32(image.pointee.width), Int32(image.pointee.height))
+        wl_surface_commit(surface)
+        cursorSurface = surface
+        cursorHotspot = (Int32(image.pointee.hotspot_x) / scale, Int32(image.pointee.hotspot_y) / scale)
+    }
+
+    private func showCursor(serial: UInt32) {
+        loadCursor()
+        guard let pointer, let cursorSurface else { return }
+        wl_pointer_set_cursor(pointer, serial, cursorSurface, cursorHotspot.0, cursorHotspot.1)
+    }
 
     nonisolated(unsafe) private static let pointerListener: UnsafeMutablePointer<wl_pointer_listener> = {
         let listener = UnsafeMutablePointer<wl_pointer_listener>.allocate(capacity: 1)
         listener.initialize(to: wl_pointer_listener(
-            enter: { data, _, _, surface, x, y in
+            enter: { data, _, serial, surface, x, y in
                 guard let wayland = wayland(data), let surface else { return }
+                wayland.showCursor(serial: serial)
                 wayland.pointerWindow = wayland.windows[surface]
                 wayland.pointerX = Float(wl_fixed_to_double(x))
                 wayland.pointerY = Float(wl_fixed_to_double(y))
