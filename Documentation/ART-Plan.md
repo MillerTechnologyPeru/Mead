@@ -481,8 +481,12 @@ Order:
    the first; modifiers don't. The pointer shows the cursor theme's arrow
    (libwayland-cursor, XCURSOR_THEME and XCURSOR_SIZE, at the outputs'
    scale). Both are built and the checks pass, but they haven't been tried
-   with a real keyboard and mouse. Remaining: Android's pointer icons (the
-   text beam), animated cursors, scroll's high resolution.
+   with a real keyboard and mouse. Android's pointer icons follow the app
+   (`IInputManager.setPointerIconType`, as CSS cursor names with X11 names
+   as fallbacks: the text beam over text, the hand over links), and a
+   captioned window's shadow shows the resize arrows (2026-11-11; built and
+   checked, not yet seen on screen). Remaining: animated cursors, custom
+   pointer icons (bitmaps), scroll's high resolution.
    Windows draw at the output's scale (2026-11-11): Android's pixels are
    device pixels, the density is Wayland's scale (`MEAD_DISPLAY_SCALE`
    overrides it), the size given on the command line is in the desktop's
@@ -510,10 +514,28 @@ Order:
    geometry is the frame, without the shadow. Compositor resizes reach
    Android through a window-events thread (IWindow.resized, then relayout
    at the compositor's size). MEAD_CAPTIONS=0 or 1 overrides. Seen working
-   on the Duet (2026-11-11). Remaining: resize cursors on the edges, and
-   the caption's colors following the app's theme.
+   on the Duet (2026-11-11). Remaining: the caption's colors following the
+   app's theme.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
-   transforms; `ANativeWindow_lock`.
+   transforms; `ANativeWindow_lock`. Child surfaces done 2026-11-11: a
+   `SurfaceControl` made with a parent is a layer in its window
+   (`mead_gui_create_layer`), a desynchronized subsurface of the window's
+   root with no input region, with its own surface, viewport and
+   `wl_egl_window`. Transactions set layers' places, sizes, order and
+   visibility (`mead_gui_update_layer`): under the window's content when
+   the order is negative, as a `SurfaceView`'s is, through the hole the
+   view hierarchy leaves, and over it otherwise (`setZOrderOnTop`). Color
+   and container layers keep their state and show nothing; crops,
+   matrices, alpha and colors aren't shown yet. `ViewRootImpl`'s bounds
+   layer is a buffer layer nothing draws to, so it's an empty subsurface.
+   `SurfaceViewCheck` draws frames into a `SurfaceView` with `lockCanvas`
+   under a label (passes on the Duet). `Surface::lock` and
+   `unlockAndPost` were already there (`NATIVE_WINDOW_LOCK`). Remaining:
+   buffer geometry and scaling through the layer's viewport
+   (`setFixedSize`, `ANativeWindow_setBuffersGeometry`), transforms,
+   crops, and the NDK's `ANativeWindow` on ART's surfaces
+   (`ANativeWindow_fromSurface`, EGL and Vulkan taking a libgui surface),
+   which games need (phase 6).
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
    clipboard.
 5. dmabuf gralloc through GBM.
@@ -614,6 +636,16 @@ the Retroid.
   clients do without Play Services, so no stand-in is needed.
 
 Exit: the three games work at least as well as on MeadJNI.
+
+Started 2026-11-11: the NDK's `ALooper` is the thread's `android::Looper`
+under ART, the one Java's `MessageQueue` polls (libandroid_runtime's
+`mead/looper.h`, as Android's libandroid has it); without ART it's Mead's
+own. Defense Zone 2 HD on ART (the base APK, with its arm64 libraries in
+the app's library directory): `UnityPlayerActivity` runs, its window opens,
+libunity and il2cpp load, and Unity reports the device; then it waits.
+Missing for it: the asset pack split (`UnityDataAssetPack`, which Play
+Core can't fetch without the Play Store), the NDK's `ANativeWindow` on
+ART's surfaces, and the clipboard service.
 
 ### Phase 7: remove MeadJNI
 
