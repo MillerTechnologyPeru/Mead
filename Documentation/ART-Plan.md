@@ -502,6 +502,16 @@ Order:
    black at the dialog's dimAmount, with no input region (DialogCheck; seen
    on the Duet). The ← up arrow works: activities get their manifest
    meta-data, and up-navigation matches an alias's target.
+   Decorations where the compositor draws none (GNOME): activities run in
+   Android's freeform windowing mode, so their DecorView draws Android's
+   caption (maximize, close) and a shadow in surface insets. The caption's
+   drag is xdg_toplevel.move, maximize is set_maximized, close finishes the
+   activity; a press in the shadow resizes from that edge. The window
+   geometry is the frame, without the shadow. Compositor resizes reach
+   Android through a window-events thread (IWindow.resized, then relayout
+   at the compositor's size). MEAD_CAPTIONS=0 or 1 overrides. Seen working
+   on the Duet (2026-11-11). Remaining: resize cursors on the edges, and
+   the caption's colors following the app's theme.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
