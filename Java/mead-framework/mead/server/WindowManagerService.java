@@ -26,6 +26,15 @@ final class WindowManagerService extends WindowManagerBase {
     /** Shows a window, or hides it. */
     static native void nativeShowWindow(Surface surface, boolean shown);
 
+    /**
+     * Where a window's frame starts in its surface, which its surface insets
+     * (a shadow's room) make bigger: input is in the frame's coordinates.
+     */
+    static native void nativeSetInputOffset(Surface surface, int x, int y);
+
+    /** The window Android's focus is on, whose keys it gets; null for none. */
+    static native void nativeSetFocus(Surface surface);
+
     /** Sends a window's input to the server end of its input channel. */
     static native void nativeAttachInput(Surface surface, InputChannel serverChannel);
 
