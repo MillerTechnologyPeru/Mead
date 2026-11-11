@@ -33,6 +33,8 @@ final class ARTDisplay {
         typealias SetNativeWindow = @convention(c) (UnsafeMutableRawPointer, UInt) -> Void
         typealias ResizeSurface = @convention(c) (UnsafeMutableRawPointer, UInt32, UInt32) -> Void
         typealias SurfaceToJava = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, UnsafeMutableRawPointer) -> jobject?
+        typealias SurfaceFromJava = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> UnsafeMutableRawPointer?
+        typealias SetWindowCallbacks = @convention(c) (UnsafeRawPointer) -> Void
         typealias OpenInput = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, UnsafePointer<CChar>, UnsafeMutablePointer<OpaquePointer?>) -> jobject?
         typealias SendKey = @convention(c) (OpaquePointer, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int64) -> Int32
         typealias SendMotion = @convention(c) (OpaquePointer, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int64,
@@ -44,6 +46,8 @@ final class ARTDisplay {
         let setNativeWindow: SetNativeWindow
         let resizeSurface: ResizeSurface
         let surfaceToJava: SurfaceToJava
+        let surfaceFromJava: SurfaceFromJava
+        let setWindowCallbacks: SetWindowCallbacks
         let openInput: OpenInput
         let sendKey: SendKey
         let sendMotion: SendMotion
@@ -59,6 +63,8 @@ final class ARTDisplay {
             setNativeWindow = try symbol(gui, "mead_surface_set_native_window")
             resizeSurface = try symbol(gui, "mead_surface_resize")
             surfaceToJava = try symbol(runtime, "mead_surface_to_java")
+            surfaceFromJava = try symbol(runtime, "mead_surface_from_java")
+            setWindowCallbacks = try symbol(gui, "mead_gui_set_window_callbacks")
             openInput = try symbol(runtime, "mead_input_open")
             sendKey = try symbol(runtime, "mead_input_send_key")
             sendMotion = try symbol(runtime, "mead_input_send_motion")
@@ -72,9 +78,6 @@ final class ARTDisplay {
         let native: SDLNativeWindow?
         /// The surface, an ANativeWindow from `mead_surface_create`.
         var surface: UnsafeMutableRawPointer?
-        /// The surface as its Java Surface's mNativeObject has it: the
-        /// android::Surface, which isn't at the ANativeWindow's address.
-        var javaSurface: Int64 = 0
         /// The input channel's server end, from `mead_input_open`.
         var input: OpaquePointer?
         var pixelWidth: Int32 = 0
@@ -209,6 +212,7 @@ final class ARTDisplay {
         functions = try Functions(gui: gui, runtime: runtime)
         pthread_mutex_init(&windowsLock, nil)
         pthread_mutex_init(&queueLock, nil)
+        installWindowCallbacks()
     }
 
     // MARK: The display thread
@@ -295,14 +299,10 @@ final class ARTDisplay {
 
     /// The window an android.view.Surface draws to.
     func window(env: UnsafeMutablePointer<JNIEnv?>?, surface: jobject?) -> Window? {
-        guard let env, let jni = env.pointee?.pointee, let surface,
-              let type = jni.GetObjectClass(env, surface),
-              let field = jni.GetFieldID(env, type, "mNativeObject", "J") else { return nil }
-        let native = jni.GetLongField(env, surface, field)
-        jni.DeleteLocalRef(env, type)
+        guard let native = functions.surfaceFromJava(env, surface) else { return nil }
         pthread_mutex_lock(&windowsLock)
         defer { pthread_mutex_unlock(&windowsLock) }
-        return windows.first { $0.javaSurface != 0 && $0.javaSurface == native }
+        return windows.first { $0.surface == native }
     }
 
     // MARK: Surfaces
@@ -311,6 +311,18 @@ final class ARTDisplay {
     /// `android.view.Surface`; nil, with the reason on standard error, when
     /// there's no window to be had.
     func createSurface(env: UnsafeMutablePointer<JNIEnv?>?, title: String, width: Int32, height: Int32) -> jobject? {
+        guard let window = createWindow(title: title, width: width, height: height), let surface = window.surface else {
+            return nil
+        }
+        // The Java Surface holds its own reference; the window keeps the one
+        // mead_surface_create gave.
+        return functions.surfaceToJava(env, surface)
+    }
+
+    /// A new window titled `title`, of width×height pixels, and its surface,
+    /// which holds the reference `mead_surface_create` gave; nil, with the
+    /// reason on standard error, when there's no window to be had.
+    func createWindow(title: String, width: Int32, height: Int32) -> Window? {
         let made: Window?? = onDisplayThread { [self] in
             guard let handle = SDL.createWindow(title, width, height, 0) else {
                 Self.report("no window: \(SDL.lastError)")
@@ -347,18 +359,44 @@ final class ARTDisplay {
         if let native = window.native {
             functions.setNativeWindow(surface, native.eglWindow)
         }
-        // The Java Surface holds its own reference; the window keeps the one
-        // mead_surface_create gave.
-        guard let javaSurface = functions.surfaceToJava(env, surface) else { return nil }
-        if let jni = env?.pointee?.pointee, let type = jni.GetObjectClass(env, javaSurface),
-           let field = jni.GetFieldID(env, type, "mNativeObject", "J") {
-            window.javaSurface = jni.GetLongField(env, javaSurface, field)
-            jni.DeleteLocalRef(env, type)
-        }
         pthread_mutex_lock(&windowsLock)
         windows.append(window)
         pthread_mutex_unlock(&windowsLock)
-        return javaSurface
+        return window
+    }
+
+    /// Closes the window whose surface `surface` is; its SurfaceControl is
+    /// gone.
+    func destroyWindow(surface: UnsafeMutableRawPointer) {
+        pthread_mutex_lock(&windowsLock)
+        let index = windows.firstIndex { $0.surface == surface }
+        let window = index.map { windows.remove(at: $0) }
+        pthread_mutex_unlock(&windowsLock)
+        guard let window else { return }
+        enqueue {
+            window.surface = nil
+            SDL.destroyWindow(window.handle)
+        }
+    }
+
+    /// Makes the windows of the window manager's SurfaceControls, through
+    /// libgui's window callbacks.
+    private func installWindowCallbacks() {
+        typealias Create = @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt32, UInt32) -> UnsafeMutableRawPointer?
+        typealias Destroy = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Void
+        let create: Create = { _, name, width, height in
+            // The SurfaceControl takes the surface's reference.
+            ARTDisplay.shared?.createWindow(title: name.map { String(cString: $0) } ?? "Mead",
+                                            width: Int32(width), height: Int32(height))?.surface
+        }
+        let destroy: Destroy = { _, surface in
+            guard let surface else { return }
+            ARTDisplay.shared?.destroyWindow(surface: surface)
+        }
+        // MeadWindowCallbacks: the context, create and destroy.
+        let callbacks: [UnsafeRawPointer?] = [nil, unsafeBitCast(create, to: UnsafeRawPointer.self),
+                                              unsafeBitCast(destroy, to: UnsafeRawPointer.self)]
+        callbacks.withUnsafeBytes { functions.setWindowCallbacks($0.baseAddress!) }
     }
 
     /// An input channel for the window `surface` draws to: its client end, an
@@ -405,6 +443,15 @@ final class ARTDisplay {
         if let surface = window.surface {
             functions.resizeSurface(surface, UInt32(window.pixelWidth), UInt32(window.pixelHeight))
         }
+    }
+
+    /// SDL's IDs for the gamepads open; none before the display thread starts.
+    func openGamepads() -> [UInt32] {
+        pthread_mutex_lock(&queueLock)
+        let running = started && startFailure == nil
+        pthread_mutex_unlock(&queueLock)
+        guard running else { return [] }
+        return onDisplayThread { [self] in gamepads.keys.sorted() } ?? []
     }
 
     static func report(_ message: String) {
