@@ -91,6 +91,18 @@ final class Wayland {
 
     unowned let bridge: ARTDisplay
 
+    /// Device pixels per logical pixel of Wayland's (the first output's
+    /// scale). Android's pixels are device pixels: its windows' buffers are
+    /// at full resolution, and sizes, places and input convert.
+    private(set) var scale: Int32 = 1
+
+    /// Pixels in logical pixels, at least one.
+    func logical(_ pixels: Int32) -> Int32 { max((pixels + scale - 1) / scale, 1) }
+    /// A position in pixels in logical pixels.
+    func logicalPosition(_ pixels: Int32) -> Int32 { Int32((Double(pixels) / Double(scale)).rounded(.down)) }
+    /// Wayland's logical coordinate in pixels.
+    func pixels(_ value: wl_fixed_t) -> Float { Float(wl_fixed_to_double(value)) * Float(scale) }
+
     private var context: UnsafeMutableRawPointer { Unmanaged.passUnretained(self).toOpaque() }
 
     /// Connects to the compositor (WAYLAND_DISPLAY), or nil.
@@ -104,6 +116,9 @@ final class Wayland {
         // shm's formats, the seat's capabilities).
         _ = wl_display_roundtrip(display)
         _ = wl_display_roundtrip(display)
+        // MEAD_DISPLAY_SCALE overrides the output's, as a whole number.
+        let chosen = getenv("MEAD_DISPLAY_SCALE").flatMap { Int32(String(cString: $0)) }
+        scale = max(chosen ?? outputs.first?.scale ?? 1, 1)
     }
 
     /// What the compositor lacks of what the bridge needs, or nil.
@@ -232,11 +247,7 @@ final class Wayland {
         _ = xdg_surface_add_listener(xdgSurface, Self.xdgSurfaceListener, windowContext)
         switch (window.kind, window.parent) {
         case (.popup, let parent?) where parent.xdgSurface != nil:
-            let positioner = xdg_wm_base_create_positioner(wmBase)
-            xdg_positioner_set_size(positioner, max(window.width, 1), max(window.height, 1))
-            xdg_positioner_set_anchor_rect(positioner, window.x, window.y, 1, 1)
-            xdg_positioner_set_anchor(positioner, UInt32(XDG_POSITIONER_ANCHOR_TOP_LEFT.rawValue))
-            xdg_positioner_set_gravity(positioner, UInt32(XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT.rawValue))
+            let positioner = makePositioner(window, in: parent)
             xdg_positioner_set_constraint_adjustment(positioner,
                 UInt32(XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X.rawValue | XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y.rawValue))
             window.popup = xdg_surface_get_popup(xdgSurface, parent.xdgSurface, positioner)
@@ -309,13 +320,13 @@ final class Wayland {
     fileprivate func configured(_ window: ARTDisplay.Window, serial: UInt32) {
         xdg_surface_ack_configure(window.xdgSurface, serial)
         if let size = window.pendingSize, size.width > 0, size.height > 0,
-           size.width != window.width || size.height != window.height {
-            bridge.resize(window, width: size.width, height: size.height)
+           size.width * scale != window.width || size.height * scale != window.height {
+            bridge.resize(window, width: size.width * scale, height: size.height * scale)
         }
         window.pendingSize = nil
         guard let root = window.root else { return }
         wl_surface_attach(root, backgroundBuffer(), 0, 0)
-        wp_viewport_set_destination(window.rootViewport, max(window.width, 1), max(window.height, 1))
+        wp_viewport_set_destination(window.rootViewport, logical(window.width), logical(window.height))
         wl_surface_damage_buffer(root, 0, 0, 1, 1)
         wl_surface_commit(root)
         window.configured = true
@@ -324,8 +335,8 @@ final class Wayland {
     /// The window's surfaces at a new size.
     func resizeSurfaces(_ window: ARTDisplay.Window) {
         let width = max(window.width, 1), height = max(window.height, 1)
-        wp_viewport_set_destination(window.rootViewport, width, height)
-        wp_viewport_set_destination(window.layerViewport, width, height)
+        wp_viewport_set_destination(window.rootViewport, logical(width), logical(height))
+        wp_viewport_set_destination(window.layerViewport, logical(width), logical(height))
         if let eglWindow = window.eglWindow {
             wl_egl_window_resize(eglWindow, width, height, 0, 0)
         }
@@ -339,14 +350,26 @@ final class Wayland {
 
     /// A popup moved within its parent.
     func reposition(_ window: ARTDisplay.Window) {
-        guard let popup = window.popup, wmBaseVersion >= 3 else { return }
-        let positioner = xdg_wm_base_create_positioner(wmBase)
-        xdg_positioner_set_size(positioner, max(window.width, 1), max(window.height, 1))
-        xdg_positioner_set_anchor_rect(positioner, window.x, window.y, 1, 1)
-        xdg_positioner_set_anchor(positioner, UInt32(XDG_POSITIONER_ANCHOR_TOP_LEFT.rawValue))
-        xdg_positioner_set_gravity(positioner, UInt32(XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT.rawValue))
+        guard let popup = window.popup, let parent = window.parent, wmBaseVersion >= 3 else { return }
+        let positioner = makePositioner(window, in: parent)
         xdg_popup_reposition(popup, positioner, 0)
         xdg_positioner_destroy(positioner)
+    }
+
+    /// A popup's place at x, y in its parent: the anchor is a point inside
+    /// the parent, as xdg-shell requires, and the rest an offset, since a
+    /// popup's surface insets can put its corner above or left of it.
+    private func makePositioner(_ window: ARTDisplay.Window, in parent: ARTDisplay.Window) -> OpaquePointer? {
+        let positioner = xdg_wm_base_create_positioner(wmBase)
+        let x = logicalPosition(window.x), y = logicalPosition(window.y)
+        let anchorX = min(max(x, 0), max(logical(parent.width) - 1, 0))
+        let anchorY = min(max(y, 0), max(logical(parent.height) - 1, 0))
+        xdg_positioner_set_size(positioner, logical(window.width), logical(window.height))
+        xdg_positioner_set_anchor_rect(positioner, anchorX, anchorY, 1, 1)
+        xdg_positioner_set_anchor(positioner, UInt32(XDG_POSITIONER_ANCHOR_TOP_LEFT.rawValue))
+        xdg_positioner_set_gravity(positioner, UInt32(XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT.rawValue))
+        xdg_positioner_set_offset(positioner, x - anchorX, y - anchorY)
+        return positioner
     }
 
     func destroySurfaces(_ window: ARTDisplay.Window) {
@@ -455,7 +478,7 @@ final class Wayland {
         }
         wl_surface_attach(layer, held!.buffer, 0, 0)
         wl_surface_damage_buffer(layer, 0, 0, width, height)
-        wp_viewport_set_destination(window.layerViewport, max(window.width, 1), max(window.height, 1))
+        wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
         wl_surface_commit(layer)
     }
 
@@ -604,7 +627,8 @@ final class Wayland {
 
     /// A key pressed or released; a pressed key, not a modifier, repeats
     /// while it's held, as Android's dispatcher repeats them.
-    private func key(_ window: ARTDisplay.Window, code: UInt32, down: Bool) {
+    private func key(_ keyboardWindow: ARTDisplay.Window, code: UInt32, down: Bool) {
+        let window = focusTarget(keyboardWindow)
         let keyCode = bridge.waylandKey(window, code: code, down: down, modifiers: modifiers, locked: lockedModifiers)
         if down {
             if repeatRate > 0, keyCode != 0, !ARTDisplay.isModifier(keyCode) {
@@ -616,11 +640,24 @@ final class Wayland {
         }
     }
 
+    /// Android's focused window if it's the keyboard's window or one of its
+    /// dialogs or popups (which Wayland doesn't give the keyboard), else the
+    /// keyboard's window.
+    private func focusTarget(_ keyboardWindow: ARTDisplay.Window) -> ARTDisplay.Window {
+        guard let focused = bridge.androidFocus, focused.input != nil else { return keyboardWindow }
+        var ancestor: ARTDisplay.Window? = focused
+        while let current = ancestor {
+            if current === keyboardWindow { return focused }
+            ancestor = current.parent
+        }
+        return keyboardWindow
+    }
+
     /// Repeats the held key if it's due, and how long the display thread may
     /// wait for the next, in milliseconds.
     func repeatTimeout() -> Int32? {
         guard var repeating = held else { return nil }
-        guard repeating.window === keyboardWindow, repeating.window.input != nil else {
+        guard let keyboardWindow, repeating.window === focusTarget(keyboardWindow), repeating.window.input != nil else {
             held = nil
             return nil
         }
@@ -677,14 +714,14 @@ final class Wayland {
                 guard let wayland = wayland(data), let surface else { return }
                 wayland.showCursor(serial: serial)
                 wayland.pointerWindow = wayland.windows[surface]
-                wayland.pointerX = Float(wl_fixed_to_double(x))
-                wayland.pointerY = Float(wl_fixed_to_double(y))
+                wayland.pointerX = wayland.pixels(x)
+                wayland.pointerY = wayland.pixels(y)
             },
             leave: { data, _, _, _ in wayland(data)?.pointerWindow = nil },
             motion: { data, _, _, x, y in
                 guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
-                wayland.pointerX = Float(wl_fixed_to_double(x))
-                wayland.pointerY = Float(wl_fixed_to_double(y))
+                wayland.pointerX = wayland.pixels(x)
+                wayland.pointerY = wayland.pixels(y)
                 wayland.bridge.pointerMoved(window, x: wayland.pointerX, y: wayland.pointerY)
             },
             button: { data, _, _, _, button, state in
@@ -726,7 +763,7 @@ final class Wayland {
                 guard let wayland = wayland(data), let surface, let window = wayland.windows[surface] else { return }
                 wayland.touchWindows[id] = window
                 wayland.bridge.touched(window, action: .down, id: UInt64(bitPattern: Int64(id)),
-                                       x: Float(wl_fixed_to_double(x)), y: Float(wl_fixed_to_double(y)), pressure: 1)
+                                       x: wayland.pixels(x), y: wayland.pixels(y), pressure: 1)
             },
             up: { data, _, _, _, id in
                 guard let wayland = wayland(data), let window = wayland.touchWindows.removeValue(forKey: id) else { return }
@@ -735,7 +772,7 @@ final class Wayland {
             motion: { data, _, _, id, x, y in
                 guard let wayland = wayland(data), let window = wayland.touchWindows[id] else { return }
                 wayland.bridge.touched(window, action: .move, id: UInt64(bitPattern: Int64(id)),
-                                       x: Float(wl_fixed_to_double(x)), y: Float(wl_fixed_to_double(y)), pressure: 1)
+                                       x: wayland.pixels(x), y: wayland.pixels(y), pressure: 1)
             },
             frame: { _, _ in },
             cancel: { data, _ in
