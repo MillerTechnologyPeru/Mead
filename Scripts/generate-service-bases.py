@@ -23,6 +23,13 @@ INTERFACES = [
     ("com.android.internal.app.IAppOpsService", "AppOpsServiceBase"),
     ("android.hardware.input.IInputManager", "InputManagerBase"),
     ("android.media.IAudioService", "AudioServiceBase"),
+    ("android.os.IUserManager", "UserManagerBase"),
+    ("android.app.INotificationManager", "NotificationManagerBase"),
+    ("android.app.IAlarmManager", "AlarmManagerBase"),
+    ("android.os.IPowerManager", "PowerManagerBase"),
+    ("com.android.internal.appwidget.IAppWidgetService", "AppWidgetServiceBase"),
+    ("android.os.storage.IStorageManager", "StorageManagerBase"),
+    ("android.content.IContentService", "ContentServiceBase"),
 ]
 
 METHOD = re.compile(r"^\s*public abstract (.+?) (\w+)\((.*)\)( throws [\w.$, ]+)?;$")
