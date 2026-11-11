@@ -94,6 +94,12 @@ final class Wayland {
 
     unowned let bridge: ARTDisplay
 
+    /// MEAD_INPUT_TRACE: the seat's events and where they go, on stderr.
+    static let tracing = getenv("MEAD_INPUT_TRACE") != nil
+    static func trace(_ message: @autoclosure () -> String) {
+        if tracing { ARTDisplay.report("input: \(message())") }
+    }
+
     /// Device pixels per logical pixel of Wayland's (the first output's
     /// scale). Android's pixels are device pixels: its windows' buffers are
     /// at full resolution, and sizes, places and input convert.
@@ -685,6 +691,7 @@ final class Wayland {
             enter: { data, _, _, surface, _ in
                 guard let wayland = wayland(data), let surface else { return }
                 wayland.keyboardWindow = wayland.windows[surface]
+                trace("keyboard on window \(wayland.keyboardWindow?.id ?? 0)")
                 if let window = wayland.keyboardWindow { wayland.bridge.focusedWindowID = window.id }
             },
             leave: { data, _, _, _ in
@@ -714,6 +721,7 @@ final class Wayland {
     /// while it's held, as Android's dispatcher repeats them.
     private func key(_ keyboardWindow: ARTDisplay.Window, code: UInt32, down: Bool) {
         let window = focusTarget(keyboardWindow)
+        Self.trace("key \(code) \(down ? "down" : "up") on window \(keyboardWindow.id) to \(window.id) (Android's focus \(bridge.androidFocus?.id ?? 0), input \(window.input != nil))")
         let keyCode = bridge.waylandKey(window, code: code, down: down, modifiers: modifiers, locked: lockedModifiers)
         if down {
             if repeatRate > 0, keyCode != 0, !ARTDisplay.isModifier(keyCode) {
@@ -799,6 +807,7 @@ final class Wayland {
                 guard let wayland = wayland(data), let surface else { return }
                 wayland.showCursor(serial: serial)
                 wayland.pointerWindow = wayland.windows[surface]
+                trace("pointer on window \(wayland.pointerWindow?.id ?? 0)")
                 wayland.pointerX = wayland.pixels(x)
                 wayland.pointerY = wayland.pixels(y)
             },
@@ -847,6 +856,7 @@ final class Wayland {
             down: { data, _, _, _, surface, id, x, y in
                 guard let wayland = wayland(data), let surface, let window = wayland.windows[surface] else { return }
                 wayland.touchWindows[id] = window
+                trace("touch \(id) down on window \(window.id) at \(wayland.pixels(x)),\(wayland.pixels(y)) offset \(window.inputOffset) input \(window.input != nil)")
                 wayland.bridge.touched(window, action: .down, id: UInt64(bitPattern: Int64(id)),
                                        x: wayland.pixels(x), y: wayland.pixels(y), pressure: 1)
             },
