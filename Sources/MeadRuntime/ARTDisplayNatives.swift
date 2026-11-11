@@ -97,3 +97,50 @@ extension ARTDisplay {
         jni.DeleteLocalRef(env, type)
     }
 }
+
+/// WindowManagerService's natives: the window manager's windows, each a
+/// display bridge window, made when the window is first laid out.
+extension ARTDisplay {
+    func windowManagerNatives() -> [(String, String, UnsafeMutableRawPointer)] {
+        typealias Env = UnsafeMutablePointer<JNIEnv?>?
+        typealias Create = @convention(c) (Env, jclass?, jstring?, jint, jobject?, jint, jint, jint, jint) -> jlong
+        typealias SetFrame = @convention(c) (Env, jclass?, jobject?, jint, jint, jint, jint, jboolean) -> Void
+        typealias Show = @convention(c) (Env, jclass?, jobject?, jboolean) -> Void
+        typealias AttachInput = @convention(c) (Env, jclass?, jobject?, jobject?) -> Void
+
+        // A window, as a SurfaceControl's native object; 0 for none.
+        let create: Create = { env, _, title, kind, parent, x, y, width, height in
+            guard let env, let jni = env.pointee?.pointee, let display = ARTDisplay.shared else { return 0 }
+            var name = "Mead"
+            if let title, let characters = jni.GetStringUTFChars(env, title, nil) {
+                name = String(cString: characters)
+                jni.ReleaseStringUTFChars(env, title, characters)
+            }
+            let parentWindow = parent.flatMap { display.window(env: env, surface: $0) }
+            guard let window = display.createWindow(title: name, width: max(width, 1), height: max(height, 1),
+                                                    kind: WindowKind(rawValue: kind) ?? .normal, parent: parentWindow,
+                                                    x: x, y: y),
+                  let surface = window.surface else { return 0 }
+            return jlong(display.functions.surfaceControlCreate(surface))
+        }
+        let setFrame: SetFrame = { env, _, surface, x, y, width, height, popup in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.setFrame(window, x: x, y: y, width: max(width, 1), height: max(height, 1), popup: popup != 0)
+        }
+        let show: Show = { env, _, surface, shown in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.setShown(window, shown != 0)
+        }
+        let attachInput: AttachInput = { env, _, surface, channel in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.attachInput(env: env, window: window, serverChannel: channel)
+        }
+        func pointer<T>(_ function: T) -> UnsafeMutableRawPointer { unsafeBitCast(function, to: UnsafeMutableRawPointer.self) }
+        return [
+            ("nativeCreateWindow", "(Ljava/lang/String;ILandroid/view/Surface;IIII)J", pointer(create)),
+            ("nativeSetWindowFrame", "(Landroid/view/Surface;IIIIZ)V", pointer(setFrame)),
+            ("nativeShowWindow", "(Landroid/view/Surface;Z)V", pointer(show)),
+            ("nativeAttachInput", "(Landroid/view/Surface;Landroid/view/InputChannel;)V", pointer(attachInput)),
+        ]
+    }
+}
