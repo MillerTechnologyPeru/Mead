@@ -427,10 +427,12 @@ Who does what:
   `@convention(c)` closures. Window resizes, minimizing and restoring go to
   the window manager service, which tells `ViewRootImpl` (and a
   `NativeActivity`'s `onNativeWindowResized` and `onNativeWindowDestroyed`).
-- **C**: only `wayland-scanner`'s glue for the protocols, generated at build
-  time from wayland-protocols' XML, in a small target (`CMeadWayland`). The
-  build image needs wayland-scanner and wayland-protocols; at run time,
-  libwayland-client and libxkbcommon, which both targets have.
+- **C**: only `wayland-scanner`'s glue for the protocols, in a small target
+  (`CMeadWayland`). `Scripts/generate-wayland-protocols.sh` generates it from
+  wayland-protocols' XML and it's committed, with the versions in
+  `GENERATED_FROM`, so SwiftPM builds need no scanner. The build image has
+  libwayland-dev and wayland-protocols; at run time, libwayland-client and
+  libwayland-egl, which both targets have.
 - **The fork's C++**: libgui's interface describes layers (parent,
   position, stacking, buffer size, scaling mode, transform) as well as
   windows; `Surface::perform` handles `NATIVE_WINDOW_LOCK` and
@@ -455,9 +457,26 @@ run on two threads, or one thread polls both.
 Order:
 
 1. The Wayland bridge: toplevels, a subsurface per surface, CPU frames,
-   `wl_egl_window`s for EGL and Vulkan, outputs, frame callbacks. The
-   window, input and activity checks pass on it.
-2. The seat: keys through `Generic.kl`, the pointer, touch.
+   `wl_egl_window`s for EGL and Vulkan, outputs, frame callbacks. Done
+   2026-11-10 on the Duet: a toplevel per window with a desync layer
+   subsurface; CPU frames as `wl_shm` buffers over gralloc's memfds, with
+   no copy, each slot held until `wl_buffer.release`; hwui on the layer's
+   `wl_egl_window`; outputs give the display's size, density and refresh.
+   Vsync is on request: libgui asks the bridge
+   (`mead_gui_set_vsync_request`) when a receiver wants one, and the bridge
+   asks for a frame callback on the window's root. When the compositor
+   holds callbacks back, with no window mapped or the screen off, the
+   vsync comes anyway after 100 ms, so Choreographer slows but never
+   stalls. The window, activity, graphics, text and audio checks pass; the
+   input check's events pass. Its 30 frames at the display's rate are
+   still unverified, because the Duet's screen was off (10 Hz fallback).
+   Missing: decorations on GNOME (no libdecor yet, so Mutter shows none),
+   key repeat, the cursor.
+2. The seat: keys through `Generic.kl`, the pointer, touch. Done with step
+   1: evdev keys go through `Generic.kl` (`mead_input_map_key`) and xkb's
+   modifiers become meta state; the pointer and touch become
+   `MotionEvent`s. Key repeat, the cursor's image and scroll's high
+   resolution remain.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
