@@ -17,6 +17,7 @@ extension ARTDisplay {
 
         static let keyDown: Int32 = 0
         static let keyUp: Int32 = 1
+        static let flagLongPress: Int32 = 0x80
 
         static let motionDown: Int32 = 0
         static let motionUp: Int32 = 1
@@ -67,22 +68,35 @@ extension ARTDisplay {
 
     // MARK: Keys
 
-    /// A key, as Android's key code, to a window.
-    func deliverKey(_ window: Window, keyCode: Int32, scanCode: Int32, down: Bool, meta: Int32) {
+    /// A key, as Android's key code, to a window: a press, a release, or a
+    /// repeat of a held key (`repeatCount`, from 1), keeping its down time.
+    func deliverKey(_ window: Window, keyCode: Int32, scanCode: Int32, down: Bool, meta: Int32,
+                    repeatCount: Int32? = nil) {
         guard let input = window.input, keyCode != 0 else { return }
         let time = Self.now()
         let repeating = down && window.keyDownTimes[keyCode] != nil
         if down, !repeating { window.keyDownTimes[keyCode] = time }
         let downTime = window.keyDownTimes[keyCode] ?? time
         if !down { window.keyDownTimes[keyCode] = nil }
-        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, down ? Android.keyDown : Android.keyUp, 0,
-                              keyCode, scanCode, meta, repeating ? 1 : 0, downTime, time)
+        // A repeat's first is a long press, as Android's dispatcher marks it.
+        let flags: Int32 = repeatCount == 1 ? Android.flagLongPress : 0
+        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, down ? Android.keyDown : Android.keyUp, flags,
+                              keyCode, scanCode, meta, repeatCount ?? (repeating ? 1 : 0), downTime, time)
+    }
+
+    /// Whether a key is a modifier, which doesn't repeat: shift, alt,
+    /// control, meta, function and the locks.
+    static func isModifier(_ keyCode: Int32) -> Bool {
+        [57, 58, 59, 60, 113, 114, 115, 116, 117, 118, 119, 143].contains(keyCode)
     }
 
     /// A key from Wayland's keyboard: a Linux evdev code, mapped as Android's
     /// input reader maps it, by Generic.kl; xkb's usual modifier bits (shift,
     /// lock, control, mod1 alt, mod2 num lock, mod4 super) as the meta state.
-    func waylandKey(_ window: Window, code: UInt32, down: Bool, modifiers: UInt32, locked: UInt32) {
+    /// Returns the Android key code.
+    @discardableResult
+    func waylandKey(_ window: Window, code: UInt32, down: Bool, modifiers: UInt32, locked: UInt32,
+                    repeatCount: Int32? = nil) -> Int32 {
         var meta: Int32 = 0
         if modifiers & 0x01 != 0 { meta |= Android.metaShift }
         if modifiers & 0x04 != 0 { meta |= Android.metaCtrl }
@@ -90,8 +104,10 @@ extension ARTDisplay {
         if modifiers & 0x40 != 0 { meta |= Android.metaMeta }
         if locked & 0x02 != 0 { meta |= Android.metaCapsLock }
         if locked & 0x10 != 0 { meta |= Android.metaNumLock }
-        deliverKey(window, keyCode: functions.mapKey(Int32(bitPattern: code)), scanCode: Int32(bitPattern: code),
-                   down: down, meta: meta)
+        let keyCode = functions.mapKey(Int32(bitPattern: code))
+        deliverKey(window, keyCode: keyCode, scanCode: Int32(bitPattern: code), down: down, meta: meta,
+                   repeatCount: repeatCount)
+        return keyCode
     }
 
     // MARK: Motion
