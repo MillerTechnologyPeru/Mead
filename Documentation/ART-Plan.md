@@ -665,10 +665,24 @@ name its package, as `splitSourceDirs`, which `LoadedApk` adds to its
 assets; its install-time asset pack, `UnityDataAssetPack`, is one), its
 scripts run and it draws: its graphics thread renders with EGL to its
 `SurfaceView` (2400×1292) and swaps. Not yet seen on screen: the Duet's
-screen was blanked, so the swap waited for a frame callback. Activities
-aren't paused when the compositor stops showing their windows, as
-Android pauses them with the display off; a game keeps its thread
-waiting instead. Missing for it: the clipboard, connectivity, vibrator
+screen was blanked.
+
+Hidden windows stop their activities (2026-11-11), as Android stops them
+with the display off. The bridge counts a toplevel hidden when the
+compositor says so (xdg_toplevel's suspended state, xdg-shell 6:
+minimized, another workspace) or holds its frame callbacks back for two
+seconds (GNOME with the screen blanked, which isn't suspended). Window
+event kind 2 tells the window manager, and the activity manager stops the
+top activity (`StopActivityItem`, through onPause) and resumes it when the
+window shows again; the window stays mapped meanwhile, so the compositor
+can show it. `MEAD_STOP_HIDDEN=0` keeps activities resumed, for checks
+run with the screen off. Mead's EGL no longer lets a swap wait on the
+compositor: Mesa's swap at interval 1 waits for a frame callback, which
+hung Unity's render thread with the screen blanked (its pause timed out),
+so Wayland windows swap at interval 0 and Mead paces each swap to the
+app's `eglSwapInterval`, at 60 Hz for now (the EGL shim doesn't know the
+display's rate). With both, Defense Zone 2 HD pauses cleanly when the
+screen blanks. Not yet seen: resuming when it wakes. Missing for it: the clipboard, connectivity, vibrator
 and sensor services, `AudioSystem`'s natives, and Play Core's asset pack
 service (it reports the packs it can't sync; the pack is there anyway).
 
