@@ -27,7 +27,9 @@ import mead.view.MeadWindow;
 // button (injected into SDL's event queue once the first frame is drawn).
 // With MEAD_FRAME_DUMP set, the first frame is read back and checked.
 //
-// Run with: mead --dex activity-check.jar mead.server.MeadApp mead.check mead.check.ActivityCheck 640 480
+// Run with: MEAD_CAPTIONS=0 mead --dex activity-check.jar mead.server.MeadApp mead.check mead.check.ActivityCheck 640 480
+// (without Android's caption, which the window would have on GNOME: the
+// view, the frame and the injected touches are the whole window's).
 public class ActivityCheck extends Activity {
     static int failures = 0;
 
