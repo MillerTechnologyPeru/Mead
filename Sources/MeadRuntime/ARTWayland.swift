@@ -15,6 +15,10 @@ import Glibc
 /// compositor releases them; GPU frames come from a `wl_egl_window` on the
 /// layer, which EGL commits. Frame callbacks on a window's root surface are
 /// the display's vsync.
+///
+/// A layer in a window (a SurfaceView's surface) is a subsurface of the
+/// window's root, desynchronized, with no input: under the window's own
+/// layer, where Android's view hierarchy leaves a hole for it, or over it.
 final class Wayland {
     let display: OpaquePointer
     private(set) var compositor: OpaquePointer?
@@ -250,6 +254,7 @@ final class Wayland {
     /// parent's, and the layer over it; mapped once the compositor configures
     /// it. False when the compositor refused.
     func makeSurfaces(for window: ARTDisplay.Window, title: String) -> Bool {
+        if window.kind == .layer { return makeLayer(window) }
         guard let root = wl_compositor_create_surface(compositor) else { return false }
         window.root = root
         let windowContext = Unmanaged.passUnretained(window).toOpaque()
@@ -294,6 +299,66 @@ final class Wayland {
         windows[layer] = window
         map(window)
         return true
+    }
+
+    /// A layer's surface: a subsurface of its window's root, hidden until a
+    /// transaction shows it, under the window's content. False when its
+    /// window has no surfaces.
+    private func makeLayer(_ window: ARTDisplay.Window) -> Bool {
+        // A layer in a layer goes in that layer's window.
+        var host = window.parent
+        while let candidate = host, candidate.kind == .layer { host = candidate.parent }
+        guard let host, let root = host.root, let content = host.layer,
+              let layer = wl_compositor_create_surface(compositor) else { return false }
+        window.layer = layer
+        window.subsurface = wl_subcompositor_get_subsurface(subcompositor, layer, root)
+        wl_subsurface_set_position(window.subsurface, logicalPosition(window.x), logicalPosition(window.y))
+        wl_subsurface_place_below(window.subsurface, content)
+        wl_subsurface_set_desync(window.subsurface)
+        // No input: Android's window gets the touches, over it or not.
+        let region = wl_compositor_create_region(compositor)
+        wl_surface_set_input_region(layer, region)
+        wl_region_destroy(region)
+        window.layerViewport = wp_viewporter_get_viewport(viewporter, layer)
+        wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
+        window.eglWindow = wl_egl_window_create(layer, max(window.width, 1), max(window.height, 1))
+        wl_surface_commit(root)
+        return true
+    }
+
+    /// A transaction's state for a layer: its place in its window, its size,
+    /// its order against the window's content, and whether it shows.
+    func updateLayer(_ window: ARTDisplay.Window, x: Int32, y: Int32, width: Int32, height: Int32, z: Int32,
+                     shown: Bool) {
+        var host = window.parent
+        while let candidate = host, candidate.kind == .layer { host = candidate.parent }
+        guard let host, let root = host.root, let content = host.layer, let layer = window.layer,
+              let subsurface = window.subsurface else { return }
+        ARTDisplay.report("layer \(window.id) in window \(host.id): \(x),\(y) \(width)×\(height), z \(z), \(shown ? "shown" : "hidden")")
+        window.x = x
+        window.y = y
+        wl_subsurface_set_position(subsurface, logicalPosition(x), logicalPosition(y))
+        if z != window.z {
+            window.z = z
+            if z < 0 {
+                wl_subsurface_place_below(subsurface, content)
+            } else {
+                wl_subsurface_place_above(subsurface, content)
+            }
+        }
+        if width > 0, height > 0, width != window.width || height != window.height {
+            bridge.resize(window, width: width, height: height)
+        }
+        if shown != window.layerShown {
+            window.layerShown = shown
+            if !shown {
+                wl_surface_attach(layer, nil, 0, 0)
+                wl_surface_commit(layer)
+            }
+        }
+        // A subsurface's place and order apply with its parent's commit.
+        wl_surface_commit(root)
+        _ = wl_display_flush(display)
     }
 
     /// Maps a window: its first commit, without a buffer, then waits for the
@@ -680,7 +745,8 @@ final class Wayland {
     /// A CPU frame: the gralloc buffer in slot, attached in place.
     func attach(_ window: ARTDisplay.Window, slot: Int32, fd: Int32, width: Int32, height: Int32, stride: Int32,
                 format: Int32) {
-        guard let layer = window.layer else {
+        // A hidden layer shows nothing.
+        guard let layer = window.layer, window.kind != .layer || window.layerShown else {
             bridge.release(window, slot: slot)
             return
         }
