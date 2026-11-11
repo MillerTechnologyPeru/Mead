@@ -16,6 +16,11 @@ extension ART {
     /// from.
     nonisolated(unsafe) static var getDisplay: (@convention(c) (UnsafeMutableRawPointer) -> Void)?
 
+    typealias LoadKeyCharacterMapFunction = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, Int32, UnsafePointer<CChar>) -> jobject?
+
+    /// libandroid_runtime's `mead_input_load_key_character_map`.
+    nonisolated(unsafe) static var loadKeyCharacterMap: LoadKeyCharacterMapFunction?
+
     /// Registers the services' natives and starts them, when mead-framework
     /// is on the boot class path.
     func startServices() throws {
@@ -48,6 +53,43 @@ extension ART {
         }
         try register(env: env, className: "mead/server/DisplayManagerService",
                      natives: [("nativeGetDisplay", "()[F", unsafeBitCast(getDisplay, to: UnsafeMutableRawPointer.self))])
+
+        // WindowManagerService.nativeOpenInput: a window's input channel,
+        // from the display bridge.
+        typealias OpenInput = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?, jobject?) -> jobject?
+        let openInput: OpenInput = { env, _, surface in
+            ARTDisplay.shared?.openInput(env: env, surface: surface)
+        }
+        try register(env: env, className: "mead/server/WindowManagerService",
+                     natives: [("nativeOpenInput", "(Landroid/view/Surface;)Landroid/view/InputChannel;",
+                                unsafeBitCast(openInput, to: UnsafeMutableRawPointer.self))])
+
+        // InputManagerService's: key character maps, through libinput, and
+        // the gamepads SDL has open.
+        typealias LoadKeyCharacterMap = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?, jint, jstring?) -> jobject?
+        typealias Gamepads = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?) -> jintArray?
+        if let runtime = dlopen("\(nativesDirectory)/libandroid_runtime.so", RTLD_NOW | RTLD_NOLOAD),
+           let symbol = dlsym(runtime, "mead_input_load_key_character_map") {
+            Self.loadKeyCharacterMap = unsafeBitCast(symbol, to: LoadKeyCharacterMapFunction.self)
+        }
+        let loadKeyCharacterMap: LoadKeyCharacterMap = { env, _, deviceId, path in
+            guard let env, let jni = env.pointee?.pointee, let path,
+                  let characters = jni.GetStringUTFChars(env, path, nil) else { return nil }
+            defer { jni.ReleaseStringUTFChars(env, path, characters) }
+            return ART.loadKeyCharacterMap?(env, deviceId, characters)
+        }
+        let gamepads: Gamepads = { env, _ in
+            guard let env, let jni = env.pointee?.pointee else { return nil }
+            let ids = ARTDisplay.shared?.openGamepads() ?? []
+            guard let array = jni.NewIntArray(env, jsize(ids.count)) else { return nil }
+            jni.SetIntArrayRegion(env, array, 0, jsize(ids.count), ids.map { jint(bitPattern: $0) })
+            return array
+        }
+        try register(env: env, className: "mead/server/InputManagerService", natives: [
+            ("nativeLoadKeyCharacterMap", "(ILjava/lang/String;)Landroid/view/KeyCharacterMap;",
+             unsafeBitCast(loadKeyCharacterMap, to: UnsafeMutableRawPointer.self)),
+            ("nativeGamepads", "()[I", unsafeBitCast(gamepads, to: UnsafeMutableRawPointer.self)),
+        ])
 
         guard let start = jni.GetStaticMethodID(env, services, "start", "()V") else {
             throw Failure("mead.server.MeadServices has no start()\(describeException(env))")
