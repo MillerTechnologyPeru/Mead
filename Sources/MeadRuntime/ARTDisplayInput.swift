@@ -129,6 +129,9 @@ extension ARTDisplay {
         for (index, pointer) in pointers.enumerated() {
             for (axis, value) in pointer.axes where axis >= 0 && Int(axis) < axisCount {
                 bits |= UInt64(1) << UInt64(axis)
+                var value = value
+                if axis == Android.axisX { value -= window.inputOffset.x }
+                if axis == Android.axisY { value -= window.inputOffset.y }
                 values[index * axisCount + Int(axis)] = value
             }
         }
