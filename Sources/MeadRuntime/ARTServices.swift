@@ -84,7 +84,24 @@ extension ART {
             jni.SetIntArrayRegion(env, array, 0, jsize(ids.count), ids.map { jint(bitPattern: $0) })
             return array
         }
+        // PointerIcon's types as the cursor theme's CSS names.
+        typealias SetPointerIcon = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?, jint) -> Void
+        let setPointerIcon: SetPointerIcon = { _, _, type in
+            let names: [Int32: String] = [
+                0: "none", 1000: "default", 1001: "context-menu", 1002: "pointer", 1003: "help", 1004: "wait",
+                1006: "cell", 1007: "crosshair", 1008: "text", 1009: "vertical-text", 1010: "alias", 1011: "copy",
+                1012: "no-drop", 1013: "all-scroll", 1014: "ew-resize", 1015: "ns-resize", 1016: "nesw-resize",
+                1017: "nwse-resize", 1018: "zoom-in", 1019: "zoom-out", 1020: "grab", 1021: "grabbing",
+            ]
+            let name = names[type] ?? "default"
+            guard let display = ARTDisplay.shared else { return }
+            display.enqueue {
+                display.wayland?.appCursor = name
+                display.wayland?.updateCursor()
+            }
+        }
         try register(env: env, className: "mead/server/InputManagerService", natives: [
+            ("nativeSetPointerIcon", "(I)V", unsafeBitCast(setPointerIcon, to: UnsafeMutableRawPointer.self)),
             ("nativeLoadKeyCharacterMap", "(ILjava/lang/String;)Landroid/view/KeyCharacterMap;",
              unsafeBitCast(loadKeyCharacterMap, to: UnsafeMutableRawPointer.self)),
             ("nativeGamepads", "()[I", unsafeBitCast(gamepads, to: UnsafeMutableRawPointer.self)),
