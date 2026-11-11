@@ -32,6 +32,12 @@ final class WindowManagerService extends WindowManagerBase {
      */
     static native void nativeSetInputOffset(Surface surface, int x, int y);
 
+    /**
+     * How much a window dims the window under it while it shows, as
+     * FLAG_DIM_BEHIND's dimAmount: 0 for none.
+     */
+    static native void nativeSetDimBehind(Surface surface, float amount);
+
     /** The window Android's focus is on, whose keys it gets; null for none. */
     static native void nativeSetFocus(Surface surface);
 
