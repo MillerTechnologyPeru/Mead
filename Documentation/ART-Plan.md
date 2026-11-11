@@ -352,10 +352,23 @@ How the graphics stack is built, as of the work so far:
   draws with `Canvas` and gets a touch, a key and a gamepad button. It
   passes, with the first frame read back. The Retroid is untried.
 
+- **Audio**: `AudioTrack`'s natives are Swift (`Sources/MeadRuntime/ARTAudio.swift`),
+  each track an SDL audio stream on the default playback device (PipeWire
+  or PulseAudio on GNOME, ALSA on ROCKNIX), in the track's own format,
+  which SDL converts to the device's. Streaming tracks queue up to their
+  buffer's size, blocking writes waiting for the device; static tracks keep
+  their data and queue it, with its loops, when played; the playback head
+  is what's been written less what SDL still holds. Rate changes go to
+  SDL's resampling; marker and period notifications aren't sent yet. The
+  audio service tracks players and has every stream at full volume.
+  `Tests/ART/AudioCheck.java` passes on the Duet: a second's tone takes
+  about a second to write, and the head follows.
+
 Still to come in phase 4:
 
 - **TextureView**: libgui's `BufferQueue`, in-process.
-- Audio, as listed above.
+- `AudioRecord`, AAudio for NDK code under ART, and `AudioTrack`'s
+  marker and period notifications.
 
 ### Phase 5: in-process system services (Swift)
 
