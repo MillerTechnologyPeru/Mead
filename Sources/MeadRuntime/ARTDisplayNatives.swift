@@ -107,7 +107,11 @@ extension ARTDisplay {
         typealias SetFrame = @convention(c) (Env, jclass?, jobject?, jint, jint, jint, jint, jboolean) -> Void
         typealias Show = @convention(c) (Env, jclass?, jobject?, jboolean) -> Void
         typealias AttachInput = @convention(c) (Env, jclass?, jobject?, jobject?) -> Void
-        typealias SetInputOffset = @convention(c) (Env, jclass?, jobject?, jint, jint) -> Void
+        typealias SetFrameInSurface = @convention(c) (Env, jclass?, jobject?, jint, jint, jint, jint) -> Void
+        typealias WantsCaptions = @convention(c) (Env, jclass?) -> jboolean
+        typealias SurfaceAction = @convention(c) (Env, jclass?, jobject?) -> Void
+        typealias WindowID = @convention(c) (Env, jclass?, jobject?) -> jint
+        typealias NextWindowEvent = @convention(c) (Env, jclass?) -> jintArray?
         typealias SetFocus = @convention(c) (Env, jclass?, jobject?) -> Void
         typealias SetDimBehind = @convention(c) (Env, jclass?, jobject?, jfloat) -> Void
 
@@ -138,9 +142,36 @@ extension ARTDisplay {
             guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
             display.attachInput(env: env, window: window, serverChannel: channel)
         }
-        let setInputOffset: SetInputOffset = { env, _, surface, x, y in
+        let setFrameInSurface: SetFrameInSurface = { env, _, surface, x, y, width, height in
             guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
-            display.enqueue { window.inputOffset = (Float(x), Float(y)) }
+            display.enqueue {
+                window.inputOffset = (Float(x), Float(y))
+                window.frame = (x, y, max(width, 1), max(height, 1))
+                display.wayland?.setWindowGeometry(window)
+            }
+        }
+        let wantsCaptions: WantsCaptions = { _, _ in
+            guard let display = ARTDisplay.shared else { return 0 }
+            return display.onDisplayThread { display.wayland?.decorations == nil } == true ? 1 : 0
+        }
+        let startMove: SurfaceAction = { env, _, surface in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.enqueue { display.wayland?.startMove(window) }
+        }
+        let toggleMaximized: SurfaceAction = { env, _, surface in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.enqueue { display.wayland?.toggleMaximized(window) }
+        }
+        let windowID: WindowID = { env, _, surface in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return 0 }
+            return jint(bitPattern: window.id)
+        }
+        let nextWindowEvent: NextWindowEvent = { env, _ in
+            guard let env, let jni = env.pointee?.pointee, let display = ARTDisplay.shared,
+                  let array = jni.NewIntArray(env, 4) else { return nil }
+            var event = display.nextWindowEvent()
+            jni.SetIntArrayRegion(env, array, 0, 4, &event)
+            return array
         }
         let setFocus: SetFocus = { env, _, surface in
             guard let display = ARTDisplay.shared else { return }
@@ -157,7 +188,12 @@ extension ARTDisplay {
         func pointer<T>(_ function: T) -> UnsafeMutableRawPointer { unsafeBitCast(function, to: UnsafeMutableRawPointer.self) }
         return [
             ("nativeSetDimBehind", "(Landroid/view/Surface;F)V", pointer(setDimBehind)),
-            ("nativeSetInputOffset", "(Landroid/view/Surface;II)V", pointer(setInputOffset)),
+            ("nativeSetFrameInSurface", "(Landroid/view/Surface;IIII)V", pointer(setFrameInSurface)),
+            ("nativeWantsCaptions", "()Z", pointer(wantsCaptions)),
+            ("nativeStartMove", "(Landroid/view/Surface;)V", pointer(startMove)),
+            ("nativeToggleMaximized", "(Landroid/view/Surface;)V", pointer(toggleMaximized)),
+            ("nativeWindowId", "(Landroid/view/Surface;)I", pointer(windowID)),
+            ("nativeNextWindowEvent", "()[I", pointer(nextWindowEvent)),
             ("nativeSetFocus", "(Landroid/view/Surface;)V", pointer(setFocus)),
             ("nativeCreateWindow", "(Ljava/lang/String;ILandroid/view/Surface;IIII)J", pointer(create)),
             ("nativeSetWindowFrame", "(Landroid/view/Surface;IIIIZ)V", pointer(setFrame)),
