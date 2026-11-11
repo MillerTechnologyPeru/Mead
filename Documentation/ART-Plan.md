@@ -505,6 +505,50 @@ Exit: a small open-source app (from F-Droid) runs, with layouts inflated from
 its resources, AppCompat themes, `RecyclerView` and navigation between
 activities.
 
+**Met on the Duet, 2026-11-10**, with Loop Habit Tracker 2.3.2 (F-Droid,
+`org.isoron.uhabits`, no native code): `mead --dex <apk> mead.server.MeadApp
+800 600`. Its main screen draws from its own resources and AppCompat theme;
+**+** opens its habit-type dialog, "Yes or No" starts `EditHabitActivity`,
+a typed name is saved to its SQLite database and shows in the habit list
+(`RecyclerView`); tapping the habit starts `ShowHabitActivity`, with its
+charts; Back returns to the list, and Back again finishes the app. The
+earlier checks (Core, Crypto, Framework, Native, Text, Graphics, Window,
+Input, Audio, Activity) still pass. What it took:
+
+- `MeadApp` reads an APK's manifest (`PackageParser`): its activities,
+  intent filters and permissions, and its launcher activity.
+- The activity task manager keeps a stack of activity records and drives
+  them as Android does: starting pauses the top one, launches the new one,
+  and stops the one below when the new one is idle; finishing pauses, resumes
+  the one below with its results, then destroys; Back on the task's root
+  finishes it, and the process ends with its last activity. Intents resolve
+  by component or by the manifest's filters.
+- The window session gives each window its own SDL window and input
+  channel: an activity's window is a window of its own; a dialog over one,
+  even filling it, is that window's modal child; a sub-window (popup menu,
+  spinner) is an SDL popup placed by its gravity. Focus goes to the newest
+  visible focusable window. These go to Wayland directly with the display
+  bridge's move below.
+- New services: user (one unlocked owner), notification (logged), alarm
+  (logged, not fired yet), power, app widget (none), storage (one emulated
+  volume, `~/.mead/storage`) and content (content observers); pending
+  intents, broadcast receivers and broadcasts in the activity manager.
+  statsd's natives (`StatsLog`, `StatsLogInternal`) do nothing
+  (`mead.server.NativeStubs`).
+- In the fork: Android 10's SQLite (`external/sqlite`, static, its symbols
+  hidden) and the database JNI; a batch of view, text and utility JNI
+  (`PathParser`, `PropertyValuesHolder`, `Hyphenator`, `VirtualRefBasePtr`
+  and others); `ActivityThread`'s natives; `/data` mapped to
+  `ANDROID_DATA`; no swap interval on hwui's surfaces, Choreographer pacing
+  frames.
+- `MEAD_DEBUG_TAPS="secs:x,y;secs:key=scancode;secs:text=words"` plays
+  input into the focused window, for driving an app on a host nobody's at;
+  `MEAD_FRAME_DUMP` writes each window's frames to their own file.
+
+Not yet: an input method (text arrives as hardware keys; `showSoftInput`
+is logged), alarms firing, `textservices`, services (`startService`), and
+the Retroid.
+
 ### Phase 6: games move to ART
 
 - `NativeActivity`, GameActivity (in the APK) and Unity's player (in the APK)
