@@ -349,9 +349,17 @@ final class Wayland {
     /// size (the compositor's, when it gives one).
     fileprivate func configured(_ window: ARTDisplay.Window, serial: UInt32) {
         xdg_surface_ack_configure(window.xdgSurface, serial)
-        if let size = window.pendingSize, size.width > 0, size.height > 0,
-           size.width * scale != window.width || size.height * scale != window.height {
-            bridge.resize(window, width: size.width * scale, height: size.height * scale)
+        if let size = window.pendingSize, size.width > 0, size.height > 0 {
+            let width = size.width * scale, height = size.height * scale
+            if let frame = window.frame {
+                // The window manager's window: Android lays it out at the
+                // new frame and resizes its surface (shadow and all).
+                if width != frame.width || height != frame.height {
+                    bridge.postWindowEvent(kind: 1, window: window, width: width, height: height)
+                }
+            } else if width != window.width || height != window.height {
+                bridge.resize(window, width: width, height: height)
+            }
         }
         window.pendingSize = nil
         guard let root = window.root else { return }
@@ -380,6 +388,61 @@ final class Wayland {
         if let layer = window.layer {
             wl_surface_commit(layer)
         }
+    }
+
+    /// A toplevel's window, to the compositor, is its frame: its surface
+    /// insets (a freeform window's shadow) are outside it.
+    func setWindowGeometry(_ window: ARTDisplay.Window) {
+        guard window.toplevel != nil, let xdgSurface = window.xdgSurface, let frame = window.frame else { return }
+        xdg_surface_set_window_geometry(xdgSurface, logicalPosition(frame.x), logicalPosition(frame.y),
+                                        logical(frame.width), logical(frame.height))
+        if let root = window.root, window.mapped { wl_surface_commit(root) }
+    }
+
+    /// The latest serial of a press or touch, which moving and resizing
+    /// with the compositor take.
+    private var pressSerial: UInt32 = 0
+
+    /// The toplevel a window is in: its own, or its parent's.
+    private func toplevel(of window: ARTDisplay.Window) -> ARTDisplay.Window? {
+        var current: ARTDisplay.Window? = window
+        while let candidate = current {
+            if candidate.toplevel != nil { return candidate }
+            current = candidate.parent
+        }
+        return nil
+    }
+
+    /// The caption dragged: the compositor moves the window.
+    func startMove(_ window: ARTDisplay.Window) {
+        guard let seat, let toplevel = toplevel(of: window)?.toplevel else { return }
+        xdg_toplevel_move(toplevel, seat, pressSerial)
+    }
+
+    /// The caption's maximize button.
+    func toggleMaximized(_ window: ARTDisplay.Window) {
+        guard let window = toplevel(of: window), let toplevel = window.toplevel else { return }
+        if window.maximized {
+            xdg_toplevel_unset_maximized(toplevel)
+        } else {
+            xdg_toplevel_set_maximized(toplevel)
+        }
+    }
+
+    /// A press outside a captioned window's frame, in its shadow: the
+    /// compositor resizes it from that edge or corner. False if the press
+    /// is the app's.
+    private func resizeFromEdge(_ window: ARTDisplay.Window, x: Float, y: Float) -> Bool {
+        guard window.kind == .normal, let seat, let toplevel = window.toplevel, let frame = window.frame,
+              !window.maximized else { return false }
+        var edges: UInt32 = 0
+        if x < Float(frame.x) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_LEFT.rawValue) }
+        if x >= Float(frame.x + frame.width) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_RIGHT.rawValue) }
+        if y < Float(frame.y) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_TOP.rawValue) }
+        if y >= Float(frame.y + frame.height) { edges |= UInt32(XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM.rawValue) }
+        guard edges != 0 else { return false }
+        xdg_toplevel_resize(toplevel, seat, pressSerial, edges)
+        return true
     }
 
     /// Dims a window while a child of its that dims (a dialog) is mapped, as
@@ -574,9 +637,19 @@ final class Wayland {
     nonisolated(unsafe) private static let toplevelListener: UnsafeMutablePointer<xdg_toplevel_listener> = {
         let listener = UnsafeMutablePointer<xdg_toplevel_listener>.allocate(capacity: 1)
         listener.initialize(to: xdg_toplevel_listener(
-            configure: { data, _, width, height, _ in
+            configure: { data, _, width, height, states in
                 guard let data else { return }
-                Unmanaged<ARTDisplay.Window>.fromOpaque(data).takeUnretainedValue().pendingSize = (width, height)
+                let window = Unmanaged<ARTDisplay.Window>.fromOpaque(data).takeUnretainedValue()
+                window.pendingSize = (width, height)
+                var maximized = false
+                if let states, let words = states.pointee.data {
+                    let count = states.pointee.size / MemoryLayout<UInt32>.size
+                    let values = words.bindMemory(to: UInt32.self, capacity: count)
+                    for index in 0..<count where values[index] == UInt32(XDG_TOPLEVEL_STATE_MAXIMIZED.rawValue) {
+                        maximized = true
+                    }
+                }
+                window.maximized = maximized
             },
             close: { data, _ in
                 guard let data else { return }
@@ -885,8 +958,12 @@ final class Wayland {
                 wayland.pointerY = wayland.pixels(y)
                 wayland.bridge.pointerMoved(window, x: wayland.pointerX, y: wayland.pointerY)
             },
-            button: { data, _, _, _, button, state in
+            button: { data, _, serial, _, button, state in
                 guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
+                if state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue) {
+                    wayland.pressSerial = serial
+                    if button == 0x110, wayland.resizeFromEdge(window, x: wayland.pointerX, y: wayland.pointerY) { return }
+                }
                 // Linux's BTN_LEFT, BTN_RIGHT and BTN_MIDDLE.
                 let android: Int32
                 switch button {
@@ -920,8 +997,12 @@ final class Wayland {
     nonisolated(unsafe) private static let touchListener: UnsafeMutablePointer<wl_touch_listener> = {
         let listener = UnsafeMutablePointer<wl_touch_listener>.allocate(capacity: 1)
         listener.initialize(to: wl_touch_listener(
-            down: { data, _, _, _, surface, id, x, y in
+            down: { data, _, serial, _, surface, id, x, y in
                 guard let wayland = wayland(data), let surface, let window = wayland.windows[surface] else { return }
+                wayland.pressSerial = serial
+                if wayland.touchWindows.isEmpty, wayland.resizeFromEdge(window, x: wayland.pixels(x), y: wayland.pixels(y)) {
+                    return
+                }
                 wayland.touchWindows[id] = window
                 trace("touch \(id) down on window \(window.id) at \(wayland.pixels(x)),\(wayland.pixels(y)) offset \(window.inputOffset) input \(window.input != nil)")
                 wayland.bridge.touched(window, action: .down, id: UInt64(bitPattern: Int64(id)),
