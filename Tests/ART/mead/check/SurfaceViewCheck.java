@@ -18,7 +18,8 @@ import android.widget.TextView;
 // in the activity's window, which the display bridge shows as a subsurface
 // under the window's content, through the hole the view hierarchy leaves.
 // The left one's buffer is the view's size; the right one's is half that, by
-// setFixedSize, which its layer's matrix scales up to the view. The check
+// setFixedSize, which its layer's matrix scales up to the view, then a
+// quarter, resizing its layer while it draws. The check
 // draws frames into both with lockCanvas, a moving bar on blue, under labels
 // the window draws over them, for four seconds. Each surface must be created
 // at its size and take frames; that they show, the right one as big as the
@@ -121,7 +122,7 @@ public class SurfaceViewCheck extends Activity {
         final Drawn left = new Drawn("view-sized", plain);
         root.addView(labeled(plain, "SurfaceView", size));
 
-        SurfaceView fixed = new SurfaceView(this);
+        final SurfaceView fixed = new SurfaceView(this);
         fixed.getHolder().setFixedSize(size / 2, size / 2);
         final Drawn right = new Drawn("fixed-size", fixed);
         FrameLayout rightFrame = labeled(fixed, "setFixedSize", size);
@@ -133,8 +134,14 @@ public class SurfaceViewCheck extends Activity {
         mHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
+                fixed.getHolder().setFixedSize(size / 4, size / 4);
+            }
+        }, 2000);
+        mHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
                 left.finish(size, size);
-                right.finish(size / 2, size / 2);
+                right.finish(size / 4, size / 4);
                 System.out.println(mFailures == 0 ? "SurfaceViewCheck passed" : "SurfaceViewCheck: " + mFailures + " failed");
                 System.exit(mFailures == 0 ? 0 : 1);
             }
