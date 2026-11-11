@@ -1,10 +1,11 @@
 import Glibc
 import MeadWindow
 
-/// SDL's events, on the display thread, as Android's input events on the
-/// windows' input channels: keys as `KeyEvent`s, and the mouse, touches and
+/// Input, on the display thread, as Android's input events on the windows'
+/// input channels: keys as `KeyEvent`s, and the pointer, touches and
 /// gamepads' axes as `MotionEvent`s, with Android's sources, actions and
-/// axes.
+/// axes. From Wayland's seat (ARTWayland.swift), and from SDL's events:
+/// gamepads, and the keys and touches checks inject.
 extension ARTDisplay {
     // Android's input constants (android/input.h).
     enum Android {
@@ -41,6 +42,14 @@ extension ARTDisplay {
         static let buttonSecondary: Int32 = 2
         static let buttonTertiary: Int32 = 4
 
+        // KeyEvent's meta state bits.
+        static let metaShift: Int32 = 0x1 | 0x40
+        static let metaAlt: Int32 = 0x2 | 0x10
+        static let metaCtrl: Int32 = 0x1000 | 0x2000
+        static let metaMeta: Int32 = 0x10000 | 0x20000
+        static let metaCapsLock: Int32 = 0x100000
+        static let metaNumLock: Int32 = 0x200000
+
         // The input devices' IDs here: one keyboard, one mouse, one
         // touchscreen, and gamepads from gamepadBase on by SDL's ID.
         static let keyboard: Int32 = 1
@@ -56,61 +65,33 @@ extension ARTDisplay {
         return Int64(time.tv_sec) * 1_000_000_000 + Int64(time.tv_nsec)
     }
 
-    func handle(_ event: mead_sdl_event) {
-        switch Int(event.type) {
-        case MEAD_SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            if let window = window(id: event.window.windowID) { resized(window) }
-        case MEAD_SDL_EVENT_WINDOW_FOCUS_GAINED:
-            focusedWindowID = event.window.windowID
-        case MEAD_SDL_EVENT_KEY_DOWN, MEAD_SDL_EVENT_KEY_UP:
-            key(event.key)
-        case MEAD_SDL_EVENT_MOUSE_BUTTON_DOWN, MEAD_SDL_EVENT_MOUSE_BUTTON_UP:
-            mouseButton(event.button)
-        case MEAD_SDL_EVENT_MOUSE_MOTION:
-            mouseMotion(event.motion)
-        case MEAD_SDL_EVENT_MOUSE_WHEEL:
-            mouseWheel(event.wheel)
-        case MEAD_SDL_EVENT_FINGER_DOWN, MEAD_SDL_EVENT_FINGER_UP, MEAD_SDL_EVENT_FINGER_MOTION:
-            finger(event.finger)
-        case MEAD_SDL_EVENT_GAMEPAD_ADDED:
-            if gamepads[event.gdevice.which] == nil, let gamepad = SDL.openGamepad(event.gdevice.which) {
-                gamepads[event.gdevice.which] = gamepad
-            }
-        case MEAD_SDL_EVENT_GAMEPAD_REMOVED:
-            if let gamepad = gamepads.removeValue(forKey: event.gdevice.which) {
-                SDL.closeGamepad(gamepad)
-            }
-            gamepadAxes[event.gdevice.which] = nil
-        case MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN, MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP:
-            gamepadButton(event.gbutton)
-        case MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION:
-            gamepadAxis(event.gaxis)
-        default:
-            break
-        }
-    }
-
     // MARK: Keys
 
-    private func key(_ key: mead_sdl_keyboard_event) {
-        guard let window = window(id: key.windowID) ?? inputWindow, let input = window.input else { return }
-        let code = androidKeyCode(forScancode: key.scancode)
-        guard code != 0 else { return }
+    /// A key, as Android's key code, to a window.
+    func deliverKey(_ window: Window, keyCode: Int32, scanCode: Int32, down: Bool, meta: Int32) {
+        guard let input = window.input, keyCode != 0 else { return }
         let time = Self.now()
-        if key.down, !key.repeat { window.keyDownTimes[key.scancode] = time }
-        let downTime = window.keyDownTimes[key.scancode] ?? time
-        if !key.down { window.keyDownTimes[key.scancode] = nil }
-        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, key.down ? Android.keyDown : Android.keyUp, 0,
-                              code, Int32(key.scancode), androidMetaState(key.mod), key.repeat ? 1 : 0, downTime, time)
+        let repeating = down && window.keyDownTimes[keyCode] != nil
+        if down, !repeating { window.keyDownTimes[keyCode] = time }
+        let downTime = window.keyDownTimes[keyCode] ?? time
+        if !down { window.keyDownTimes[keyCode] = nil }
+        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, down ? Android.keyDown : Android.keyUp, 0,
+                              keyCode, scanCode, meta, repeating ? 1 : 0, downTime, time)
     }
 
-    private func gamepadButton(_ button: mead_sdl_gamepad_button_event) {
-        guard let window = inputWindow, let input = window.input else { return }
-        let code = androidKeyCode(forGamepadButton: button.button)
-        guard code != 0 else { return }
-        let time = Self.now()
-        _ = functions.sendKey(input, Android.gamepadBase + Int32(button.which), Android.sourceGamepad,
-                              button.down ? Android.keyDown : Android.keyUp, 0, code, 0, 0, 0, time, time)
+    /// A key from Wayland's keyboard: a Linux evdev code, mapped as Android's
+    /// input reader maps it, by Generic.kl; xkb's usual modifier bits (shift,
+    /// lock, control, mod1 alt, mod2 num lock, mod4 super) as the meta state.
+    func waylandKey(_ window: Window, code: UInt32, down: Bool, modifiers: UInt32, locked: UInt32) {
+        var meta: Int32 = 0
+        if modifiers & 0x01 != 0 { meta |= Android.metaShift }
+        if modifiers & 0x04 != 0 { meta |= Android.metaCtrl }
+        if modifiers & 0x08 != 0 { meta |= Android.metaAlt }
+        if modifiers & 0x40 != 0 { meta |= Android.metaMeta }
+        if locked & 0x02 != 0 { meta |= Android.metaCapsLock }
+        if locked & 0x10 != 0 { meta |= Android.metaNumLock }
+        deliverKey(window, keyCode: functions.mapKey(Int32(bitPattern: code)), scanCode: Int32(bitPattern: code),
+                   down: down, meta: meta)
     }
 
     // MARK: Motion
@@ -140,38 +121,31 @@ extension ARTDisplay {
                                     UInt32(pointers.count), ids, tools, bits, values)
     }
 
-    private func mousePointer(_ window: Window, x: Float, y: Float) -> Pointer {
-        Pointer(id: 0, tool: Android.toolMouse,
-                axes: [Android.axisX: x * window.pixelsPerPoint, Android.axisY: y * window.pixelsPerPoint, Android.axisPressure: 1])
+    private func mousePointer(x: Float, y: Float) -> Pointer {
+        Pointer(id: 0, tool: Android.toolMouse, axes: [Android.axisX: x, Android.axisY: y, Android.axisPressure: 1])
     }
 
-    private func mouseButton(_ button: mead_sdl_mouse_button_event) {
-        guard let window = window(id: button.windowID), window.input != nil else { return }
-        let android: Int32
-        switch Int(button.button) {
-        case MEAD_SDL_BUTTON_LEFT: android = Android.buttonPrimary
-        case MEAD_SDL_BUTTON_RIGHT: android = Android.buttonSecondary
-        case MEAD_SDL_BUTTON_MIDDLE: android = Android.buttonTertiary
-        default: return
-        }
-        let pointer = mousePointer(window, x: button.x, y: button.y)
+    /// A mouse button (Android's), at x, y in the window's pixels.
+    func pointerButton(_ window: Window, button: Int32, down: Bool, x: Float, y: Float) {
+        guard window.input != nil else { return }
+        let pointer = mousePointer(x: x, y: y)
         let time = Self.now()
-        if button.down {
+        if down {
             // As Android's mouse: DOWN with the first button, then
             // BUTTON_PRESS for each.
             let first = window.mouseButtons == 0
-            window.mouseButtons |= android
+            window.mouseButtons |= button
             if first {
                 window.mouseDownTime = time
                 sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionDown,
                            buttonState: window.mouseButtons, downTime: time, pointers: [pointer])
             }
             sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionButtonPress,
-                       actionButton: android, buttonState: window.mouseButtons, downTime: window.mouseDownTime, pointers: [pointer])
+                       actionButton: button, buttonState: window.mouseButtons, downTime: window.mouseDownTime, pointers: [pointer])
         } else {
-            window.mouseButtons &= ~android
+            window.mouseButtons &= ~button
             sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionButtonRelease,
-                       actionButton: android, buttonState: window.mouseButtons, downTime: window.mouseDownTime, pointers: [pointer])
+                       actionButton: button, buttonState: window.mouseButtons, downTime: window.mouseDownTime, pointers: [pointer])
             if window.mouseButtons == 0 {
                 sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionUp,
                            downTime: window.mouseDownTime, pointers: [pointer])
@@ -179,41 +153,44 @@ extension ARTDisplay {
         }
     }
 
-    private func mouseMotion(_ motion: mead_sdl_mouse_motion_event) {
-        guard let window = window(id: motion.windowID), window.input != nil else { return }
-        let pointer = mousePointer(window, x: motion.x, y: motion.y)
+    /// The mouse moved to x, y in the window's pixels.
+    func pointerMoved(_ window: Window, x: Float, y: Float) {
+        guard window.input != nil else { return }
+        let pointer = mousePointer(x: x, y: y)
         if window.mouseButtons != 0 {
             sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionMove,
                        buttonState: window.mouseButtons, downTime: window.mouseDownTime, pointers: [pointer])
         } else {
-            let time = Self.now()
             sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionHoverMove,
-                       downTime: time, pointers: [pointer])
+                       downTime: Self.now(), pointers: [pointer])
         }
     }
 
-    private func mouseWheel(_ wheel: mead_sdl_mouse_wheel_event) {
-        guard let window = window(id: wheel.windowID), window.input != nil else { return }
-        let flipped = wheel.direction == UInt32(MEAD_SDL_MOUSEWHEEL_FLIPPED) ? Float(-1) : 1
-        var pointer = mousePointer(window, x: wheel.mouse_x, y: wheel.mouse_y)
-        pointer.axes[Android.axisVScroll] = wheel.y * flipped
-        pointer.axes[Android.axisHScroll] = wheel.x * flipped
-        let time = Self.now()
+    /// Scrolling at x, y, in notches: up and right positive.
+    func pointerScrolled(_ window: Window, x: Float, y: Float, vertical: Float, horizontal: Float) {
+        guard window.input != nil else { return }
+        var pointer = mousePointer(x: x, y: y)
+        pointer.axes[Android.axisVScroll] = vertical
+        pointer.axes[Android.axisHScroll] = horizontal
         sendMotion(window, device: Android.mouse, source: Android.sourceMouse, action: Android.motionScroll,
-                   buttonState: window.mouseButtons, downTime: time, pointers: [pointer])
+                   buttonState: window.mouseButtons, downTime: Self.now(), pointers: [pointer])
     }
 
-    private func finger(_ touch: mead_sdl_touch_event) {
-        guard let window = window(id: touch.windowID) ?? inputWindow, window.input != nil else { return }
-        let x = touch.x * Float(window.pixelWidth), y = touch.y * Float(window.pixelHeight)
+    enum TouchAction { case down, up, move }
+
+    /// A touch, by its source's ID, at x, y in the window's pixels (an up
+    /// keeps the touch's last place when it has none).
+    func touched(_ window: Window, action touchAction: TouchAction, id source: UInt64, x: Float?, y: Float?,
+                 pressure: Float) {
+        guard window.input != nil else { return }
         let time = Self.now()
         var action: Int32
-        switch Int(touch.type) {
-        case MEAD_SDL_EVENT_FINGER_DOWN:
+        switch touchAction {
+        case .down:
             // The lowest pointer ID not in use, as Android numbers them.
             var id: Int32 = 0
             while window.fingers.contains(where: { $0.id == id }) { id += 1 }
-            window.fingers.append((touch.fingerID, id, x, y, touch.pressure))
+            window.fingers.append((source, id, x ?? 0, y ?? 0, pressure))
             let index = Int32(window.fingers.count - 1)
             if window.fingers.count == 1 {
                 window.touchDownTime = time
@@ -221,16 +198,18 @@ extension ARTDisplay {
             } else {
                 action = Android.motionPointerDown | index << 8
             }
-        case MEAD_SDL_EVENT_FINGER_UP:
-            guard let index = window.fingers.firstIndex(where: { $0.sdl == touch.fingerID }) else { return }
-            window.fingers[index].x = x
-            window.fingers[index].y = y
+        case .up:
+            guard let index = window.fingers.firstIndex(where: { $0.source == source }) else { return }
+            if let x, let y {
+                window.fingers[index].x = x
+                window.fingers[index].y = y
+            }
             action = window.fingers.count == 1 ? Android.motionUp : Android.motionPointerUp | Int32(index) << 8
-        default:
-            guard let index = window.fingers.firstIndex(where: { $0.sdl == touch.fingerID }) else { return }
-            window.fingers[index].x = x
-            window.fingers[index].y = y
-            window.fingers[index].pressure = touch.pressure
+        case .move:
+            guard let index = window.fingers.firstIndex(where: { $0.source == source }) else { return }
+            window.fingers[index].x = x ?? window.fingers[index].x
+            window.fingers[index].y = y ?? window.fingers[index].y
+            window.fingers[index].pressure = pressure
             action = Android.motionMove
         }
         let pointers = window.fingers.map {
@@ -240,9 +219,54 @@ extension ARTDisplay {
         }
         sendMotion(window, device: Android.touchscreen, source: Android.sourceTouchscreen, action: action,
                    downTime: window.touchDownTime, pointers: pointers)
-        if Int(touch.type) == MEAD_SDL_EVENT_FINGER_UP {
-            window.fingers.removeAll { $0.sdl == touch.fingerID }
+        if touchAction == .up {
+            window.fingers.removeAll { $0.source == source }
         }
+    }
+
+    // MARK: SDL's events
+
+    /// SDL's events: gamepads, and keys and touches injected for checks (SDL
+    /// has no windows here; theirs carry Mead's window IDs).
+    func handle(_ event: mead_sdl_event) {
+        switch Int(event.type) {
+        case MEAD_SDL_EVENT_KEY_DOWN, MEAD_SDL_EVENT_KEY_UP:
+            let key = event.key
+            guard let window = window(id: key.windowID) ?? inputWindow else { return }
+            deliverKey(window, keyCode: androidKeyCode(forScancode: key.scancode), scanCode: Int32(key.scancode),
+                       down: key.down, meta: androidMetaState(key.mod))
+        case MEAD_SDL_EVENT_FINGER_DOWN, MEAD_SDL_EVENT_FINGER_UP, MEAD_SDL_EVENT_FINGER_MOTION:
+            let touch = event.finger
+            guard let window = window(id: touch.windowID) ?? inputWindow else { return }
+            let action: TouchAction = Int(touch.type) == MEAD_SDL_EVENT_FINGER_DOWN ? .down
+                : Int(touch.type) == MEAD_SDL_EVENT_FINGER_UP ? .up : .move
+            touched(window, action: action, id: touch.fingerID,
+                    x: touch.x * Float(window.width), y: touch.y * Float(window.height), pressure: touch.pressure)
+        case MEAD_SDL_EVENT_GAMEPAD_ADDED:
+            if gamepads[event.gdevice.which] == nil, let gamepad = SDL.openGamepad(event.gdevice.which) {
+                gamepads[event.gdevice.which] = gamepad
+            }
+        case MEAD_SDL_EVENT_GAMEPAD_REMOVED:
+            if let gamepad = gamepads.removeValue(forKey: event.gdevice.which) {
+                SDL.closeGamepad(gamepad)
+            }
+            gamepadAxes[event.gdevice.which] = nil
+        case MEAD_SDL_EVENT_GAMEPAD_BUTTON_DOWN, MEAD_SDL_EVENT_GAMEPAD_BUTTON_UP:
+            gamepadButton(event.gbutton)
+        case MEAD_SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            gamepadAxis(event.gaxis)
+        default:
+            break
+        }
+    }
+
+    private func gamepadButton(_ button: mead_sdl_gamepad_button_event) {
+        guard let window = inputWindow, let input = window.input else { return }
+        let code = androidKeyCode(forGamepadButton: button.button)
+        guard code != 0 else { return }
+        let time = Self.now()
+        _ = functions.sendKey(input, Android.gamepadBase + Int32(button.which), Android.sourceGamepad,
+                              button.down ? Android.keyDown : Android.keyUp, 0, code, 0, 0, 0, time, time)
     }
 
     private func gamepadAxis(_ axis: mead_sdl_gamepad_axis_event) {
@@ -253,8 +277,7 @@ extension ARTDisplay {
             axes[android] = value
         }
         gamepadAxes[axis.which] = axes
-        let time = Self.now()
         sendMotion(window, device: Android.gamepadBase + Int32(axis.which), source: Android.sourceJoystick,
-                   action: Android.motionMove, downTime: time, pointers: [Pointer(id: 0, tool: 0, axes: axes)])
+                   action: Android.motionMove, downTime: Self.now(), pointers: [Pointer(id: 0, tool: 0, axes: axes)])
     }
 }
