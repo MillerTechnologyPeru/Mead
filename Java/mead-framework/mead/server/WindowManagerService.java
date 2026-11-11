@@ -27,10 +27,55 @@ final class WindowManagerService extends WindowManagerBase {
     static native void nativeShowWindow(Surface surface, boolean shown);
 
     /**
-     * Where a window's frame starts in its surface, which its surface insets
-     * (a shadow's room) make bigger: input is in the frame's coordinates.
+     * Where a window's frame is in its surface, which its surface insets (a
+     * shadow's room) make bigger: input is in the frame's coordinates, and a
+     * toplevel's frame is its window to the compositor.
      */
-    static native void nativeSetInputOffset(Surface surface, int x, int y);
+    static native void nativeSetFrameInSurface(Surface surface, int x, int y, int width, int height);
+
+    /**
+     * Whether windows draw their own decorations: the compositor draws none
+     * (GNOME's), so activities show Android's freeform caption.
+     */
+    static native boolean nativeWantsCaptions();
+
+    /** Starts the compositor moving a window's toplevel with the pointer or finger. */
+    static native void nativeStartMove(Surface surface);
+
+    /** Maximizes a window's toplevel, or restores it. */
+    static native void nativeToggleMaximized(Surface surface);
+
+    /** A window's ID with the bridge, which its events name. */
+    static native int nativeWindowId(Surface surface);
+
+    /**
+     * The bridge's next window event, waiting for one: {kind, window ID,
+     * width, height}. Kind 1 is a toplevel the compositor resized, to a frame
+     * of width×height pixels.
+     */
+    static native int[] nativeNextWindowEvent();
+
+    private static Boolean sWantsCaptions;
+
+    /** Whether activities show Android's caption (see nativeWantsCaptions). */
+    static synchronized boolean wantsCaptions() {
+        if (sWantsCaptions == null) {
+            String forced = System.getenv("MEAD_CAPTIONS");
+            sWantsCaptions = forced != null ? !forced.equals("0") : nativeWantsCaptions();
+            Thread events = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    while (true) {
+                        int[] event = nativeNextWindowEvent();
+                        if (event != null && event[0] == 1) WindowSession.compositorResized(event[1], event[2], event[3]);
+                    }
+                }
+            }, "MeadWindowEvents");
+            events.setDaemon(true);
+            events.start();
+        }
+        return sWantsCaptions;
+    }
 
     /**
      * How much a window dims the window under it while it shows, as
