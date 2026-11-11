@@ -162,6 +162,11 @@ final class ARTDisplay {
         /// Where the window's frame starts in its surface (its surface
         /// insets), taken from input's coordinates.
         var inputOffset: (x: Float, y: Float) = (0, 0)
+        /// Its frame in its surface, in pixels, once the window manager has
+        /// said (its windows are the window manager's to size); nil for a
+        /// window of its own (MeadWindow's).
+        var frame: (x: Int32, y: Int32, width: Int32, height: Int32)?
+        var maximized = false
         var mouseDownTime: Int64 = 0
         var fingers: [(source: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
         var touchDownTime: Int64 = 0
@@ -210,6 +215,29 @@ final class ARTDisplay {
     var focusedWindowID: UInt32 = 0
     var gamepads: [UInt32: SDL.Pointer] = [:]
     var gamepadAxes: [UInt32: [Int32: Float]] = [:]
+
+    // Window events for the window manager's thread (nextWindowEvent).
+    private var eventLock = pthread_mutex_t()
+    private var eventReady = pthread_cond_t()
+    private var events: [[Int32]] = []
+
+    /// Hands the window manager an event: kind 1, a toplevel the compositor
+    /// resized to a frame of width×height pixels.
+    func postWindowEvent(kind: Int32, window: Window, width: Int32, height: Int32) {
+        pthread_mutex_lock(&eventLock)
+        events.append([kind, Int32(bitPattern: window.id), width, height])
+        pthread_cond_signal(&eventReady)
+        pthread_mutex_unlock(&eventLock)
+    }
+
+    /// The next window event, waiting for one. On the window manager's thread.
+    func nextWindowEvent() -> [Int32] {
+        pthread_mutex_lock(&eventLock)
+        while events.isEmpty { pthread_cond_wait(&eventReady, &eventLock) }
+        let event = events.removeFirst()
+        pthread_mutex_unlock(&eventLock)
+        return event
+    }
 
     // The display thread and the work handed to it.
     private var thread = pthread_t()
