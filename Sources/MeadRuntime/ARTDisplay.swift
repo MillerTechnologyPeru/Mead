@@ -179,6 +179,12 @@ final class ARTDisplay {
         /// window of its own (MeadWindow's).
         var frame: (x: Int32, y: Int32, width: Int32, height: Int32)?
         var maximized = false
+        /// Whether the compositor has stopped showing it: xdg_toplevel's
+        /// suspended state, or its frame callbacks held back; and what the
+        /// window manager was last told.
+        var suspended = false
+        var heldBack = false
+        var reportedHidden = false
         var mouseDownTime: Int64 = 0
         var fingers: [(source: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
         var touchDownTime: Int64 = 0
@@ -234,7 +240,8 @@ final class ARTDisplay {
     private var events: [[Int32]] = []
 
     /// Hands the window manager an event: kind 1, a toplevel the compositor
-    /// resized to a frame of width×height pixels.
+    /// resized to a frame of width×height pixels; kind 2, a toplevel it
+    /// stopped showing (width 1) or shows again (width 0).
     func postWindowEvent(kind: Int32, window: Window, width: Int32, height: Int32) {
         pthread_mutex_lock(&eventLock)
         events.append([kind, Int32(bitPattern: window.id), width, height])
@@ -382,6 +389,7 @@ final class ARTDisplay {
             fds[1].revents = 0
             var waiting: Int32 = scriptNext < script.count ? 20 : 1000
             if let vsync = wayland.vsyncTimeout() { waiting = min(waiting, vsync) }
+            if let held = wayland.heldBackTimeout() { waiting = min(waiting, held) }
             if let repeating = wayland.repeatTimeout() { waiting = min(waiting, repeating) }
             if poll(&fds, 2, waiting) > 0, fds[0].revents & Int16(POLLIN) != 0 {
                 if wl_display_read_events(display) < 0 {
