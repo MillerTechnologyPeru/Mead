@@ -179,8 +179,11 @@ final class WindowSession extends WindowSessionBase {
             if (!create(state, parent)) return result;
             result |= WindowManagerGlobal.RELAYOUT_RES_FIRST_TIME | WindowManagerGlobal.RELAYOUT_RES_SURFACE_CHANGED;
         } else if (state.surfaceControl != null) {
-            WindowManagerService.nativeSetWindowFrame(state.surface, state.x, state.y, state.width, state.height,
-                    state.kind == KIND_POPUP);
+            Rect surface = surfaceRect(state, parent);
+            WindowManagerService.nativeSetWindowFrame(state.surface, surface.left, surface.top, surface.width(),
+                    surface.height(), state.kind == KIND_POPUP);
+            Rect insets = state.attrs.surfaceInsets;
+            WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
             if (visible != state.visible) WindowManagerService.nativeShowWindow(state.surface, visible);
         }
         state.visible = visible && state.surfaceControl != null;
@@ -233,12 +236,29 @@ final class WindowSession extends WindowSessionBase {
         }
     }
 
+    /**
+     * A window's surface: its frame and its surface insets around it, as
+     * Android's window manager sizes it, where hwui draws the frame at the
+     * insets' offset. A popup's place is in its parent's surface.
+     */
+    private static Rect surfaceRect(WindowState state, WindowState parent) {
+        Rect insets = state.attrs.surfaceInsets;
+        Rect surface = new Rect(state.x - insets.left, state.y - insets.top,
+                state.x + state.width + insets.right, state.y + state.height + insets.bottom);
+        if (parent != null && state.kind == KIND_POPUP) {
+            surface.offset(parent.attrs.surfaceInsets.left, parent.attrs.surfaceInsets.top);
+        }
+        return surface;
+    }
+
     /** The window's bridge window, its SurfaceControl, and its input. */
     private boolean create(WindowState state, WindowState parent) {
         CharSequence title = state.attrs.getTitle();
+        Rect surface = surfaceRect(state, parent);
         long nativeObject = WindowManagerService.nativeCreateWindow(
                 title != null && title.length() > 0 ? title.toString() : "Mead", state.kind,
-                parent != null ? parent.surface : null, state.x, state.y, state.width, state.height);
+                parent != null ? parent.surface : null, surface.left, surface.top, surface.width(),
+                surface.height());
         if (nativeObject == 0) {
             Log.e(TAG, "The display bridge made no window for " + title);
             return false;
@@ -256,6 +276,8 @@ final class WindowSession extends WindowSessionBase {
         state.surfaceControl = surfaceControl;
         state.surface = new Surface();
         state.surface.copyFrom(surfaceControl);
+        Rect insets = state.attrs.surfaceInsets;
+        WindowManagerService.nativeSetInputOffset(state.surface, insets.left, insets.top);
         if (state.serverChannel != null) {
             WindowManagerService.nativeAttachInput(state.surface, state.serverChannel);
         }
@@ -274,6 +296,7 @@ final class WindowSession extends WindowSessionBase {
                 top = state;
             }
         }
+        WindowManagerService.nativeSetFocus(top != null ? top.surface : null);
         for (WindowState state : windows) {
             boolean focused = state == top;
             if (focused == state.focused) continue;
