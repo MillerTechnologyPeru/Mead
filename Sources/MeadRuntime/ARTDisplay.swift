@@ -29,12 +29,14 @@ internal import SwiftJavaJNICore
 /// Java asks for a window through the window manager service, or through
 /// `mead.view.MeadWindow` for checks; this registers both's natives.
 final class ARTDisplay {
-    /// What a window is: a top-level window, a dialog over its parent, or a
-    /// popup (a menu, a dropdown) at a place in its parent.
+    /// What a window is: a top-level window, a dialog over its parent, a
+    /// popup (a menu, a dropdown) at a place in its parent, or a layer in
+    /// its parent (a SurfaceView's surface).
     enum WindowKind: Int32 {
         case normal = 0
         case dialog = 1
         case popup = 2
+        case layer = 3
     }
 
     /// libgui's and libandroid_runtime's functions for the bridge.
@@ -58,6 +60,7 @@ final class ARTDisplay {
         typealias MapKey = @convention(c) (Int32) -> Int32
         typealias InputFromChannel = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> OpaquePointer?
         typealias SurfaceControlCreate = @convention(c) (UnsafeMutableRawPointer) -> Int64
+        typealias SetLayerCallbacks = @convention(c) (UnsafeRawPointer) -> Void
 
         let setDisplay: SetDisplay
         let setNativeDisplay: SetNativeDisplay
@@ -76,6 +79,7 @@ final class ARTDisplay {
         let mapKey: MapKey
         let inputFromChannel: InputFromChannel
         let surfaceControlCreate: SurfaceControlCreate
+        let setLayerCallbacks: SetLayerCallbacks
 
         init(gui: UnsafeMutableRawPointer, runtime: UnsafeMutableRawPointer) throws {
             func symbol<T>(_ library: UnsafeMutableRawPointer, _ name: String) throws -> T {
@@ -99,6 +103,7 @@ final class ARTDisplay {
             mapKey = try symbol(runtime, "mead_input_map_key")
             inputFromChannel = try symbol(runtime, "mead_input_from_channel")
             surfaceControlCreate = try symbol(runtime, "mead_surface_control_create")
+            setLayerCallbacks = try symbol(gui, "mead_gui_set_layer_callbacks")
         }
     }
 
@@ -134,6 +139,10 @@ final class ARTDisplay {
         var dimSubsurface: OpaquePointer?
         var dimViewport: OpaquePointer?
         var dimShown: Float = 0
+        /// A layer's order in its parent (under its content when negative)
+        /// and whether it shows.
+        var z: Int32 = -2
+        var layerShown = false
         var configured = false
         var mapped = false
         /// The size a toplevel's last configure asked for.
@@ -272,6 +281,7 @@ final class ARTDisplay {
         pthread_mutex_init(&windowsLock, nil)
         pthread_mutex_init(&queueLock, nil)
         installWindowCallbacks()
+        installLayerCallbacks()
     }
 
     // MARK: The display thread
@@ -427,7 +437,7 @@ final class ARTDisplay {
         if let focused = window(id: focusedWindowID) { return focused }
         pthread_mutex_lock(&windowsLock)
         defer { pthread_mutex_unlock(&windowsLock) }
-        return windows.last
+        return windows.last { $0.kind != .layer }
     }
 
     /// The window an android.view.Surface draws to.
@@ -553,6 +563,47 @@ final class ARTDisplay {
         let callbacks: [UnsafeRawPointer?] = [nil, unsafeBitCast(create, to: UnsafeRawPointer.self),
                                               unsafeBitCast(destroy, to: UnsafeRawPointer.self)]
         callbacks.withUnsafeBytes { functions.setWindowCallbacks($0.baseAddress!) }
+    }
+
+    /// Makes the layers of SurfaceControls made with a parent (SurfaceViews'),
+    /// through libgui's layer callbacks.
+    private func installLayerCallbacks() {
+        typealias Create = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafePointer<CChar>?, UInt32,
+                                           UInt32) -> UnsafeMutableRawPointer?
+        typealias Update = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeRawPointer?) -> Void
+        let create: Create = { _, parent, name, width, height in
+            guard let display = ARTDisplay.shared, let parent, let window = display.window(surface: parent) else {
+                ARTDisplay.report("a layer for a surface that isn't a window's")
+                return nil
+            }
+            let title = name.map { String(cString: $0) } ?? "Mead layer"
+            // The SurfaceControl takes the surface's reference.
+            let layer = display.createWindow(title: title, width: Int32(width), height: Int32(height), kind: .layer,
+                                             parent: window)
+            if let layer { ARTDisplay.report("layer \(layer.id) in window \(window.id): \(title)") }
+            return layer?.surface
+        }
+        let update: Update = { _, surface, state in
+            guard let display = ARTDisplay.shared, let surface, let state,
+                  let layer = display.window(surface: surface) else { return }
+            // MeadLayerState: x, y, width, height, z, shown.
+            let values = state.bindMemory(to: Int32.self, capacity: 6)
+            let x = values[0], y = values[1], width = values[2], height = values[3], z = values[4], shown = values[5] != 0
+            display.enqueue {
+                display.wayland?.updateLayer(layer, x: x, y: y, width: width, height: height, z: z, shown: shown)
+            }
+        }
+        // MeadLayerCallbacks: the context, create and update.
+        let callbacks: [UnsafeRawPointer?] = [nil, unsafeBitCast(create, to: UnsafeRawPointer.self),
+                                              unsafeBitCast(update, to: UnsafeRawPointer.self)]
+        callbacks.withUnsafeBytes { functions.setLayerCallbacks($0.baseAddress!) }
+    }
+
+    /// The window or layer whose surface `surface` is.
+    func window(surface: UnsafeMutableRawPointer) -> Window? {
+        pthread_mutex_lock(&windowsLock)
+        defer { pthread_mutex_unlock(&windowsLock) }
+        return windows.first { $0.surface == surface }
     }
 
     /// An input channel for the window `surface` draws to: its client end, an
