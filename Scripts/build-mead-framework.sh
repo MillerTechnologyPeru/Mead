@@ -13,7 +13,9 @@ output=$3
 source=$(cd "$(dirname "$0")/../Java/mead-framework" && pwd)
 classes=$(mktemp -d)
 trap 'rm -rf "$classes"' EXIT
-find "$source" -name '*.java' > "$classes/sources"
+# The service bases, generated from the framework's interfaces.
+python3 "$(dirname "$0")/generate-service-bases.py" "$framework" "$classes/generated"
+find "$source" "$classes/generated" -name '*.java' > "$classes/sources"
 javac -encoding UTF-8 -nowarn --release 8 -cp "$framework" -d "$classes" @"$classes/sources"
-rm "$classes/sources"
+rm -r "$classes/sources" "$classes/generated"
 java -jar "$dx" --dex --min-sdk-version=29 --output="$output" "$classes"
