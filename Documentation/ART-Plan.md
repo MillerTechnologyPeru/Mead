@@ -536,11 +536,22 @@ Order:
    size and one at half of it by `setFixedSize`, shown at the view's size
    (passes on the Duet; its log shows the layer following the layout as
    the window resizes). `Surface::lock` and `unlockAndPost` were already there
-   (`NATIVE_WINDOW_LOCK`). Remaining: transforms, crops,
-   `ANativeWindow_setBuffersGeometry`'s scaling, and the NDK's
-   `ANativeWindow` on ART's surfaces
-   (`ANativeWindow_fromSurface`, EGL and Vulkan taking a libgui surface),
-   which games need (phase 6).
+   (`NATIVE_WINDOW_LOCK`). The NDK's `ANativeWindow` on ART's surfaces
+   done 2026-11-11: under ART `ANativeWindow_fromSurface` gives the app
+   the Surface's libgui window, and MeadAndroid's `ANativeWindow_*` hand
+   libgui's windows (told apart by their `'_wnd'` magic) to the runtime's
+   libnativewindow, `lock` and `unlockAndPost` included. Mead's EGL and
+   Vulkan draw to the `wl_egl_window` behind such a window
+   (`mead_surface_get_native_window`), and `eglGetDisplay`'s default
+   display is libgui's own connection, which hwui's EGL uses and which made
+   the windows. `NativeSurfaceCheck` fills one `SurfaceView` through
+   `ANativeWindow_lock` and draws another with EGL and GLES from a bionic
+   library (`libfixture_surface.so`; passes on the Duet). At swap interval
+   1, `eglSwapBuffers` waits for the compositor's frame callback, so a
+   game stops while the screen is blanked, as it would with its display
+   off; the check swaps at 0. Remaining: transforms, crops,
+   `ANativeWindow_setBuffersGeometry`'s scaling (EGL draws at the window's
+   size whatever the game asks), and Vulkan on these windows, unchecked.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
    clipboard.
 5. dmabuf gralloc through GBM.
@@ -649,8 +660,9 @@ own. Defense Zone 2 HD on ART (the base APK, with its arm64 libraries in
 the app's library directory): `UnityPlayerActivity` runs, its window opens,
 libunity and il2cpp load, and Unity reports the device; then it waits.
 Missing for it: the asset pack split (`UnityDataAssetPack`, which Play
-Core can't fetch without the Play Store), the NDK's `ANativeWindow` on
-ART's surfaces, and the clipboard service.
+Core can't fetch without the Play Store) and the clipboard service; the
+NDK's `ANativeWindow` on ART's surfaces is there since (Wayland plan step
+3), not yet tried with it.
 
 ### Phase 7: remove MeadJNI
 
