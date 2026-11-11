@@ -89,6 +89,8 @@ public func androidKeyCode(forScancode scancode: UInt32) -> Int32 {
     case 80: return 21 // left
     case 81: return 20 // down
     case 82: return 19 // up
+    case 101, 118: return 82 // application, menu: Android's MENU
+    case 270: return 4 // AC back: Android's BACK
     case 224: return 113 // left control
     case 225: return 59 // left shift
     case 226: return 57 // left alt
