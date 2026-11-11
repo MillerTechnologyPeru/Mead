@@ -25,6 +25,14 @@ internal import SwiftJavaJNICore
 /// window through `mead.view.MeadWindow`, whose natives this registers when
 /// the app has that class.
 final class ARTDisplay {
+    /// What a window is: a top-level window, a dialog over its parent, or a
+    /// popup (a menu, a dropdown) at a place in its parent.
+    enum WindowKind: Int32 {
+        case normal = 0
+        case dialog = 1
+        case popup = 2
+    }
+
     /// libgui's and libandroid_runtime's functions for the bridge.
     struct Functions {
         typealias SetDisplay = @convention(c) (UnsafeRawPointer) -> Void
@@ -51,6 +59,10 @@ final class ARTDisplay {
         let openInput: OpenInput
         let sendKey: SendKey
         let sendMotion: SendMotion
+        typealias InputFromChannel = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> OpaquePointer?
+        typealias SurfaceControlCreate = @convention(c) (UnsafeMutableRawPointer) -> Int64
+        let inputFromChannel: InputFromChannel
+        let surfaceControlCreate: SurfaceControlCreate
 
         init(gui: UnsafeMutableRawPointer, runtime: UnsafeMutableRawPointer) throws {
             func symbol<T>(_ library: UnsafeMutableRawPointer, _ name: String) throws -> T {
@@ -68,6 +80,8 @@ final class ARTDisplay {
             openInput = try symbol(runtime, "mead_input_open")
             sendKey = try symbol(runtime, "mead_input_send_key")
             sendMotion = try symbol(runtime, "mead_input_send_motion")
+            inputFromChannel = try symbol(runtime, "mead_input_from_channel")
+            surfaceControlCreate = try symbol(runtime, "mead_surface_control_create")
         }
     }
 
@@ -196,6 +210,11 @@ final class ARTDisplay {
     /// SDL's event type that wakes the display thread for queued work.
     private var wakeEvent: UInt32 = 0
     private var startFailure: String?
+    /// MEAD_DEBUG_TAPS's steps, the next to play, and when the first window
+    /// was made (CLOCK_MONOTONIC seconds).
+    var script: [ScriptStep] = []
+    var scriptNext = 0
+    var scriptStart: Double?
 
     nonisolated(unsafe) static var shared: ARTDisplay?
 
@@ -266,6 +285,7 @@ final class ARTDisplay {
             return
         }
         wakeEvent = SDL.registerEvents(1)
+        script = Self.parseScript(getenv("MEAD_DEBUG_TAPS").map { String(cString: $0) } ?? "")
         ready.finish(nil)
         var event = mead_sdl_event()
         while true {
@@ -279,6 +299,9 @@ final class ARTDisplay {
             queued.removeAll()
             pthread_mutex_unlock(&queueLock)
             work.forEach { $0() }
+            if scriptNext < script.count, let start = scriptStart {
+                playScript(elapsed: Double(Self.now()) / 1e9 - start)
+            }
         }
     }
 
@@ -288,13 +311,13 @@ final class ARTDisplay {
         return windows.first { $0.id == id }
     }
 
-    /// The window input without one goes to: the focused one, or the only
-    /// one.
+    /// The window input without one goes to: the focused one, or the newest.
     var inputWindow: Window? {
         if let focused = window(id: focusedWindowID) { return focused }
         pthread_mutex_lock(&windowsLock)
         defer { pthread_mutex_unlock(&windowsLock) }
-        return windows.count == 1 ? windows[0] : nil
+        // The newest window, as the window manager focuses it.
+        return windows.last
     }
 
     /// The window an android.view.Surface draws to.
@@ -322,14 +345,33 @@ final class ARTDisplay {
     /// A new window titled `title`, of width×height pixels, and its surface,
     /// which holds the reference `mead_surface_create` gave; nil, with the
     /// reason on standard error, when there's no window to be had.
-    func createWindow(title: String, width: Int32, height: Int32) -> Window? {
+    func createWindow(title: String, width: Int32, height: Int32, kind: WindowKind = .normal, parent: Window? = nil,
+                      x: Int32 = 0, y: Int32 = 0) -> Window? {
         let made: Window?? = onDisplayThread { [self] in
-            guard let handle = SDL.createWindow(title, width, height, 0) else {
+            var created: SDL.Pointer?
+            switch (kind, parent) {
+            case (.popup, let parent?):
+                // In the parent's points, from its top left.
+                let scale = parent.pixelsPerPoint
+                created = SDL.createPopupWindow(parent.handle, Int32(Float(x) / scale), Int32(Float(y) / scale),
+                                                Int32(Float(width) / scale), Int32(Float(height) / scale),
+                                                MEAD_SDL_WINDOW_POPUP_MENU)
+            case (.dialog, let parent?):
+                created = SDL.createWindow(title, width, height, 0)
+                if let created {
+                    _ = SDL.setWindowParent(created, parent.handle)
+                    _ = SDL.setWindowModal(created, true)
+                }
+            default:
+                created = SDL.createWindow(title, width, height, 0)
+            }
+            guard let handle = created else {
                 Self.report("no window: \(SDL.lastError)")
                 return nil
             }
             let window = Window(handle: handle)
             describeDisplay(for: window)
+            if scriptStart == nil { scriptStart = Double(Self.now()) / 1e9 }
             return window
         }
         guard let made, let window = made else { return nil }
@@ -437,6 +479,39 @@ final class ARTDisplay {
     }
 
     /// A window's new size, from SDL. On the display thread.
+    /// A window's position (a popup's, in its parent) and size, in pixels.
+    func setFrame(_ window: Window, x: Int32, y: Int32, width: Int32, height: Int32, popup: Bool) {
+        _ = onDisplayThread { [self] in
+            let scale = window.pixelsPerPoint
+            if popup {
+                _ = SDL.setWindowPosition(window.handle, Int32(Float(x) / scale), Int32(Float(y) / scale))
+            }
+            if width != window.pixelWidth || height != window.pixelHeight {
+                _ = SDL.setWindowSize(window.handle, Int32(Float(width) / scale), Int32(Float(height) / scale))
+                resized(window)
+            }
+        }
+    }
+
+    /// Shows a window, raised, or hides it.
+    func setShown(_ window: Window, _ shown: Bool) {
+        _ = onDisplayThread {
+            if shown {
+                _ = SDL.showWindow(window.handle)
+                _ = SDL.raiseWindow(window.handle)
+            } else {
+                _ = SDL.hideWindow(window.handle)
+            }
+        }
+    }
+
+    /// Publishes a window's input to the server end of a channel the window
+    /// manager opened.
+    func attachInput(env: UnsafeMutablePointer<JNIEnv?>?, window: Window, serverChannel: jobject?) {
+        guard let input = functions.inputFromChannel(env, serverChannel) else { return }
+        _ = onDisplayThread { window.input = input }
+    }
+
     func resized(_ window: Window) {
         window.measure()
         window.native?.resize(width: window.pixelWidth, height: window.pixelHeight)
