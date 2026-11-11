@@ -470,13 +470,19 @@ Order:
    stalls. The window, input, activity, graphics, text and audio checks
    pass; with the screen on, the input check's 30 frames come at the
    display's 16 ms (with it off, at the 100 ms fallback).
-   Missing: decorations on GNOME (no libdecor yet, so Mutter shows none),
-   key repeat, the cursor.
+   Missing: decorations on GNOME (no libdecor yet, so Mutter shows none).
+   On the Duet, libdecor's GTK plugin doesn't load for SDL either, so
+   decorations need a plugin there or Mead's own.
 2. The seat: keys through `Generic.kl`, the pointer, touch. Done with step
    1: evdev keys go through `Generic.kl` (`mead_input_map_key`) and xkb's
    modifiers become meta state; the pointer and touch become
-   `MotionEvent`s. Key repeat, the cursor's image and scroll's high
-   resolution remain.
+   `MotionEvent`s. Held keys repeat at the compositor's `repeat_info`, on
+   the display thread, with Android's repeat count and the long press on
+   the first; modifiers don't. The pointer shows the cursor theme's arrow
+   (libwayland-cursor, XCURSOR_THEME and XCURSOR_SIZE, at the outputs'
+   scale). Both are built and the checks pass, but they haven't been tried
+   with a real keyboard and mouse. Remaining: Android's pointer icons (the
+   text beam), animated cursors, scroll's high resolution.
 3. `SurfaceView`'s child surfaces, buffer geometry through viewports,
    transforms; `ANativeWindow_lock`.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
