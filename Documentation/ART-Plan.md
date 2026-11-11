@@ -526,14 +526,19 @@ Order:
    the order is negative, as a `SurfaceView`'s is, through the hole the
    view hierarchy leaves, and over it otherwise (`setZOrderOnTop`). Color
    and container layers keep their state and show nothing; crops,
-   matrices, alpha and colors aren't shown yet. `ViewRootImpl`'s bounds
-   layer is a buffer layer nothing draws to, so it's an empty subsurface.
-   `SurfaceViewCheck` draws frames into a `SurfaceView` with `lockCanvas`
-   under a label (passes on the Duet). `Surface::lock` and
-   `unlockAndPost` were already there (`NATIVE_WINDOW_LOCK`). Remaining:
-   buffer geometry and scaling through the layer's viewport
-   (`setFixedSize`, `ANativeWindow_setBuffersGeometry`), transforms,
-   crops, and the NDK's `ANativeWindow` on ART's surfaces
+   alpha and colors aren't shown yet. A layer's matrix scales its buffer
+   to its size on screen through its viewport, as `SurfaceView` sets it
+   for `setFixedSize` (`setBufferSize`, then `setMatrix` to the view's
+   size); only the matrix's scale is kept, not rotation or skew.
+   `ViewRootImpl`'s bounds layer is a buffer layer nothing draws to, so
+   it's an empty subsurface. `SurfaceViewCheck` draws frames with
+   `lockCanvas` into two `SurfaceView`s under labels, one at the view's
+   size and one at half of it by `setFixedSize`, shown at the view's size
+   (passes on the Duet; its log shows the layer following the layout as
+   the window resizes). `Surface::lock` and `unlockAndPost` were already there
+   (`NATIVE_WINDOW_LOCK`). Remaining: transforms, crops,
+   `ANativeWindow_setBuffersGeometry`'s scaling, and the NDK's
+   `ANativeWindow` on ART's surfaces
    (`ANativeWindow_fromSurface`, EGL and Vulkan taking a libgui surface),
    which games need (phase 6).
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
