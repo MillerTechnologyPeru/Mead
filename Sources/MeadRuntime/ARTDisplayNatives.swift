@@ -109,6 +109,7 @@ extension ARTDisplay {
         typealias AttachInput = @convention(c) (Env, jclass?, jobject?, jobject?) -> Void
         typealias SetInputOffset = @convention(c) (Env, jclass?, jobject?, jint, jint) -> Void
         typealias SetFocus = @convention(c) (Env, jclass?, jobject?) -> Void
+        typealias SetDimBehind = @convention(c) (Env, jclass?, jobject?, jfloat) -> Void
 
         // A window, as a SurfaceControl's native object; 0 for none.
         let create: Create = { env, _, title, kind, parent, x, y, width, height in
@@ -146,8 +147,16 @@ extension ARTDisplay {
             let window = surface.flatMap { display.window(env: env, surface: $0) }
             display.enqueue { display.androidFocus = window }
         }
+        let setDimBehind: SetDimBehind = { env, _, surface, amount in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.enqueue {
+                window.dimAmount = min(max(amount, 0), 1)
+                if let parent = window.parent { display.wayland?.updateDim(parent) }
+            }
+        }
         func pointer<T>(_ function: T) -> UnsafeMutableRawPointer { unsafeBitCast(function, to: UnsafeMutableRawPointer.self) }
         return [
+            ("nativeSetDimBehind", "(Landroid/view/Surface;F)V", pointer(setDimBehind)),
             ("nativeSetInputOffset", "(Landroid/view/Surface;II)V", pointer(setInputOffset)),
             ("nativeSetFocus", "(Landroid/view/Surface;)V", pointer(setFocus)),
             ("nativeCreateWindow", "(Ljava/lang/String;ILandroid/view/Surface;IIII)J", pointer(create)),
