@@ -143,6 +143,9 @@ final class ARTDisplay {
         /// and whether it shows.
         var z: Int32 = -2
         var layerShown = false
+        /// A layer's size on screen, in pixels, when its matrix scales its
+        /// buffer (a SurfaceView's with a fixed size); nil at its buffer's.
+        var shownSize: (width: Int32, height: Int32)?
         var configured = false
         var mapped = false
         /// The size a toplevel's last configure asked for.
@@ -586,11 +589,15 @@ final class ARTDisplay {
         let update: Update = { _, surface, state in
             guard let display = ARTDisplay.shared, let surface, let state,
                   let layer = display.window(surface: surface) else { return }
-            // MeadLayerState: x, y, width, height, z, shown.
-            let values = state.bindMemory(to: Int32.self, capacity: 6)
-            let x = values[0], y = values[1], width = values[2], height = values[3], z = values[4], shown = values[5] != 0
+            // MeadLayerState: x, y, width, height, z, shown, then its scale.
+            func value(_ index: Int) -> Int32 { state.load(fromByteOffset: index * 4, as: Int32.self) }
+            let x = value(0), y = value(1), width = value(2), height = value(3), z = value(4), shown = value(5) != 0
+            let scaleX = state.load(fromByteOffset: 24, as: Float.self)
+            let scaleY = state.load(fromByteOffset: 28, as: Float.self)
+            let shownWidth = Int32((Float(width) * scaleX).rounded()), shownHeight = Int32((Float(height) * scaleY).rounded())
             display.enqueue {
-                display.wayland?.updateLayer(layer, x: x, y: y, width: width, height: height, z: z, shown: shown)
+                display.wayland?.updateLayer(layer, x: x, y: y, width: width, height: height,
+                                             shownWidth: shownWidth, shownHeight: shownHeight, z: z, shown: shown)
             }
         }
         // MeadLayerCallbacks: the context, create and update.
