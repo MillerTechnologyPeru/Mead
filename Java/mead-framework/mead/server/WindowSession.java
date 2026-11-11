@@ -56,6 +56,8 @@ final class WindowSession extends WindowSessionBase {
         int bridgeId;
         boolean visible;
         boolean focused;
+        /** Whether the compositor has stopped showing it (minimized, the screen off). */
+        boolean compositorHidden;
 
         WindowState(IWindow window) {
             this.window = window;
@@ -112,6 +114,19 @@ final class WindowSession extends WindowSessionBase {
             } catch (RemoteException e) {
                 // The window is in this process.
             }
+        }
+    }
+
+    /**
+     * The compositor stopped showing a toplevel (minimized, covered, the
+     * screen off), or shows it again: its activity is stopped, as Android
+     * stops it with the display off, and resumed.
+     */
+    static void compositorHid(int bridgeId, boolean hidden) {
+        for (WindowState state : allWindows()) {
+            if (state.bridgeId != bridgeId || state.kind != KIND_NORMAL) continue;
+            state.compositorHidden = hidden;
+            MeadServices.sActivityTaskManager.compositorHid(state.attrs.token, hidden);
         }
     }
 
@@ -260,7 +275,11 @@ final class WindowSession extends WindowSessionBase {
             WindowManagerService.nativeSetFrameInSurface(state.surface, insets.left, insets.top, state.width,
                     state.height);
             WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
-            if (visible != state.visible) WindowManagerService.nativeShowWindow(state.surface, visible);
+            // A window the compositor hid stays mapped while its activity
+            // is stopped, so that the compositor can show it again.
+            if (visible != state.visible && (visible || !state.compositorHidden)) {
+                WindowManagerService.nativeShowWindow(state.surface, visible);
+            }
         }
         state.visible = visible && state.surfaceControl != null;
         if (state.visible) {
