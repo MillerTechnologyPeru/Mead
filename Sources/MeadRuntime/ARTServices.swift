@@ -54,15 +54,11 @@ extension ART {
         try register(env: env, className: "mead/server/DisplayManagerService",
                      natives: [("nativeGetDisplay", "()[F", unsafeBitCast(getDisplay, to: UnsafeMutableRawPointer.self))])
 
-        // WindowManagerService.nativeOpenInput: a window's input channel,
-        // from the display bridge.
-        typealias OpenInput = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?, jobject?) -> jobject?
-        let openInput: OpenInput = { env, _, surface in
-            ARTDisplay.shared?.openInput(env: env, surface: surface)
+        // WindowManagerService's: its windows, from the display bridge.
+        if let display = ARTDisplay.shared {
+            try register(env: env, className: "mead/server/WindowManagerService",
+                         natives: display.windowManagerNatives())
         }
-        try register(env: env, className: "mead/server/WindowManagerService",
-                     natives: [("nativeOpenInput", "(Landroid/view/Surface;)Landroid/view/InputChannel;",
-                                unsafeBitCast(openInput, to: UnsafeMutableRawPointer.self))])
 
         // InputManagerService's: key character maps, through libinput, and
         // the gamepads SDL has open.
@@ -91,6 +87,8 @@ extension ART {
             ("nativeGamepads", "()[I", unsafeBitCast(gamepads, to: UnsafeMutableRawPointer.self)),
         ])
 
+        try registerNativeStubs(env: env)
+
         guard let start = jni.GetStaticMethodID(env, services, "start", "()V") else {
             throw Failure("mead.server.MeadServices has no start()\(describeException(env))")
         }
@@ -116,6 +114,51 @@ extension ART {
         jni.DeleteLocalRef(env, type)
         if result != JNI_OK {
             throw Failure("\(className)'s natives didn't register\(describeException(env))")
+        }
+    }
+
+    /// A native for NativeStubs' classes: nothing done, zero returned. It
+    /// takes the arguments each method's descriptor says, and never reads
+    /// them.
+    private static let nativeStub: @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jclass?) -> jlong = { _, _ in 0 }
+
+    /// Registers mead.server.NativeStubs' classes' natives as doing nothing.
+    private func registerNativeStubs(env: JNIEnvironment) throws {
+        guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
+        guard let stubs = jni.FindClass(env, "mead/server/NativeStubs"),
+              let classesField = jni.GetStaticFieldID(env, stubs, "CLASSES", "[Ljava/lang/String;"),
+              let signaturesMethod = jni.GetStaticMethodID(env, stubs, "signatures", "(Ljava/lang/String;)[Ljava/lang/String;"),
+              let classes = jni.GetStaticObjectField(env, stubs, classesField) else {
+            jni.ExceptionClear(env)
+            return
+        }
+        func string(_ array: jobject, _ index: jsize) -> String {
+            guard let element = jni.GetObjectArrayElement(env, array, index),
+                  let characters = jni.GetStringUTFChars(env, element, nil) else { return "" }
+            defer {
+                jni.ReleaseStringUTFChars(env, element, characters)
+                jni.DeleteLocalRef(env, element)
+            }
+            return String(cString: characters)
+        }
+        let stub = unsafeBitCast(Self.nativeStub, to: UnsafeMutableRawPointer.self)
+        for index in 0..<jni.GetArrayLength(env, classes) {
+            let name = string(classes, index)
+            var argument = jvalue()
+            argument.l = jni.NewStringUTF(env, name)
+            let signatures = jni.CallStaticObjectMethodA(env, stubs, signaturesMethod, &argument)
+            jni.DeleteLocalRef(env, argument.l)
+            guard let signatures, jni.ExceptionCheck(env) == 0 else {
+                throw Failure("listing \(name)'s natives threw\(describeException(env))")
+            }
+            var natives: [(String, String, UnsafeMutableRawPointer)] = []
+            var item: jsize = 0
+            while item + 1 < jni.GetArrayLength(env, signatures) {
+                natives.append((string(signatures, item), string(signatures, item + 1), stub))
+                item += 2
+            }
+            jni.DeleteLocalRef(env, signatures)
+            try register(env: env, className: String(name.map { $0 == "." ? "/" : $0 }), natives: natives)
         }
     }
 }
