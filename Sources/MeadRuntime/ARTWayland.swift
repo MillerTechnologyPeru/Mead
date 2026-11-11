@@ -311,6 +311,7 @@ final class Wayland {
             waited += 1
         }
         window.mapped = true
+        if let parent = window.parent { updateDim(parent) }
         if vsyncWindow == nil || vsyncWindow?.mapped == false {
             vsyncWindow = window
             if vsyncWanted { requestFrame() }
@@ -336,6 +337,7 @@ final class Wayland {
     }
 
     private func windowHidden(_ window: ARTDisplay.Window) {
+        if let parent = window.parent { updateDim(parent) }
         if vsyncWindow === window {
             dropFrameCallback()
             vsyncWindow = bridge.windows.first { $0.mapped }
@@ -368,12 +370,69 @@ final class Wayland {
         if let eglWindow = window.eglWindow {
             wl_egl_window_resize(eglWindow, width, height, 0, 0)
         }
+        if let dim = window.dim {
+            wp_viewport_set_destination(window.dimViewport, logical(width), logical(height))
+            wl_surface_commit(dim)
+        }
         if let root = window.root, window.mapped {
             wl_surface_commit(root)
         }
         if let layer = window.layer {
             wl_surface_commit(layer)
         }
+    }
+
+    /// Dims a window while a child of its that dims (a dialog) is mapped, as
+    /// Android's window manager does: a layer over its content, black at
+    /// the strongest child's dimAmount.
+    func updateDim(_ window: ARTDisplay.Window) {
+        let amount = bridge.windows.filter { $0.parent === window && $0.mapped }.map(\.dimAmount).max() ?? 0
+        guard amount != window.dimShown, let root = window.root, let layer = window.layer else { return }
+        window.dimShown = amount
+        if window.dim == nil, amount > 0 {
+            guard let dim = wl_compositor_create_surface(compositor) else { return }
+            window.dim = dim
+            window.dimSubsurface = wl_subcompositor_get_subsurface(subcompositor, dim, root)
+            wl_subsurface_place_above(window.dimSubsurface, layer)
+            wl_subsurface_set_desync(window.dimSubsurface)
+            window.dimViewport = wp_viewporter_get_viewport(viewporter, dim)
+            // No input: touches go through to the window, which the dialog's
+            // modality already keeps from them.
+            let region = wl_compositor_create_region(compositor)
+            wl_surface_set_input_region(dim, region)
+            wl_region_destroy(region)
+        }
+        guard let dim = window.dim else { return }
+        if amount > 0 {
+            wl_surface_attach(dim, dimBuffer(alpha: amount), 0, 0)
+            wp_viewport_set_destination(window.dimViewport, logical(window.width), logical(window.height))
+            wl_surface_damage_buffer(dim, 0, 0, 1, 1)
+        } else {
+            wl_surface_attach(dim, nil, 0, 0)
+        }
+        wl_surface_commit(dim)
+        // The subsurface's place applies with its parent's commit.
+        wl_surface_commit(root)
+    }
+
+    /// 1×1 black buffers at each opacity the dim layer has used.
+    private var dimBuffers: [UInt8: OpaquePointer] = [:]
+
+    private func dimBuffer(alpha: Float) -> OpaquePointer? {
+        let byte = UInt8((alpha * 255).rounded())
+        if let buffer = dimBuffers[byte] { return buffer }
+        let fd = mead_wayland_memfd("mead-dim")
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        guard ftruncate(fd, 4) == 0 else { return nil }
+        // Premultiplied ARGB: black at the opacity.
+        var pixel = UInt32(byte) << 24
+        _ = Glibc.write(fd, &pixel, 4)
+        let pool = wl_shm_create_pool(shm, fd, 4)
+        let buffer = wl_shm_pool_create_buffer(pool, 0, 1, 1, 4, UInt32(WL_SHM_FORMAT_ARGB8888.rawValue))
+        wl_shm_pool_destroy(pool)
+        dimBuffers[byte] = buffer
+        return buffer
     }
 
     /// A popup moved within its parent.
@@ -464,6 +523,8 @@ final class Wayland {
             takeDownPopup(popup)
         }
         if window.popup != nil { takeDownPopup(window) }
+        window.mapped = false
+        if let parent = window.parent { updateDim(parent) }
         if vsyncWindow === window {
             dropFrameCallback()
             vsyncWindow = nil
@@ -473,6 +534,12 @@ final class Wayland {
         touchWindows = touchWindows.filter { $0.value !== window }
         for buffer in window.buffers.values { wl_buffer_destroy(buffer.buffer) }
         window.buffers.removeAll()
+        if let dimViewport = window.dimViewport { wp_viewport_destroy(dimViewport) }
+        if let dimSubsurface = window.dimSubsurface { wl_subsurface_destroy(dimSubsurface) }
+        if let dim = window.dim { wl_surface_destroy(dim) }
+        window.dim = nil
+        window.dimSubsurface = nil
+        window.dimViewport = nil
         if let eglWindow = window.eglWindow { wl_egl_window_destroy(eglWindow) }
         if let viewport = window.layerViewport { wp_viewport_destroy(viewport) }
         if let subsurface = window.subsurface { wl_subsurface_destroy(subsurface) }
