@@ -33,6 +33,14 @@ public enum SDL {
     public nonisolated(unsafe) static var getDisplayContentScale: (@convention(c) (UInt32) -> Float)!
     public nonisolated(unsafe) static var registerEvents: (@convention(c) (Int32) -> UInt32)!
     public nonisolated(unsafe) static var getWindowID: (@convention(c) (Pointer?) -> UInt32)!
+    public nonisolated(unsafe) static var createPopupWindow: (@convention(c) (Pointer?, Int32, Int32, Int32, Int32, UInt64) -> Pointer?)!
+    public nonisolated(unsafe) static var setWindowParent: (@convention(c) (Pointer?, Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var setWindowModal: (@convention(c) (Pointer?, Bool) -> Bool)!
+    public nonisolated(unsafe) static var setWindowSize: (@convention(c) (Pointer?, Int32, Int32) -> Bool)!
+    public nonisolated(unsafe) static var setWindowPosition: (@convention(c) (Pointer?, Int32, Int32) -> Bool)!
+    public nonisolated(unsafe) static var showWindow: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var hideWindow: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var raiseWindow: (@convention(c) (Pointer?) -> Bool)!
     public typealias AudioCallback = @convention(c) (Pointer?, Pointer?, Int32, Int32) -> Void
     public nonisolated(unsafe) static var openAudioDeviceStream: (@convention(c) (UInt32, UnsafePointer<mead_sdl_audio_spec>?, AudioCallback?, Pointer?) -> Pointer?)!
     public nonisolated(unsafe) static var putAudioStreamData: (@convention(c) (Pointer?, UnsafeRawPointer?, Int32) -> Bool)!
@@ -94,6 +102,14 @@ public enum SDL {
         getDisplayContentScale = bind("SDL_GetDisplayContentScale")
         registerEvents = bind("SDL_RegisterEvents")
         getWindowID = bind("SDL_GetWindowID")
+        createPopupWindow = bind("SDL_CreatePopupWindow")
+        setWindowParent = bind("SDL_SetWindowParent")
+        setWindowModal = bind("SDL_SetWindowModal")
+        setWindowSize = bind("SDL_SetWindowSize")
+        setWindowPosition = bind("SDL_SetWindowPosition")
+        showWindow = bind("SDL_ShowWindow")
+        hideWindow = bind("SDL_HideWindow")
+        raiseWindow = bind("SDL_RaiseWindow")
         openAudioDeviceStream = bind("SDL_OpenAudioDeviceStream")
         putAudioStreamData = bind("SDL_PutAudioStreamData")
         getAudioStreamQueued = bind("SDL_GetAudioStreamQueued")
