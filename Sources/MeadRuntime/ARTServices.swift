@@ -101,7 +101,7 @@ extension ART {
         }
     }
 
-    private func register(env: JNIEnvironment, className: String, natives: [(String, String, UnsafeMutableRawPointer)]) throws {
+    func register(env: JNIEnvironment, className: String, natives: [(String, String, UnsafeMutableRawPointer)]) throws {
         guard let jni = env.pointee?.pointee else { throw Failure("no JNIEnv") }
         guard let type = jni.FindClass(env, className) else {
             throw Failure("no \(className)\(describeException(env))")
