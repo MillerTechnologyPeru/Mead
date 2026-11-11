@@ -117,8 +117,9 @@ final class Wayland {
     /// Points the window's content viewport at its size on screen: its
     /// buffer's, or a layer's as its matrix scales it.
     private func setContentDestination(_ window: ARTDisplay.Window) {
+        guard let viewport = window.layerViewport else { return }
         let size = window.shownSize ?? (max(window.width, 1), max(window.height, 1))
-        wp_viewport_set_destination(window.layerViewport, logical(size.width), logical(size.height))
+        wp_viewport_set_destination(viewport, logical(size.width), logical(size.height))
     }
     /// Wayland's logical coordinate in pixels.
     func pixels(_ value: wl_fixed_t) -> Float { Float(wl_fixed_to_double(value)) * Float(scale) }
@@ -455,7 +456,10 @@ final class Wayland {
     /// The window's surfaces at a new size.
     func resizeSurfaces(_ window: ARTDisplay.Window) {
         let width = max(window.width, 1), height = max(window.height, 1)
-        wp_viewport_set_destination(window.rootViewport, logical(width), logical(height))
+        // A layer has no root: it is a subsurface of its window's.
+        if let rootViewport = window.rootViewport {
+            wp_viewport_set_destination(rootViewport, logical(width), logical(height))
+        }
         setContentDestination(window)
         if let eglWindow = window.eglWindow {
             wl_egl_window_resize(eglWindow, width, height, 0, 0)
