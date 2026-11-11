@@ -327,6 +327,7 @@ final class ARTDisplay {
             fds[1].revents = 0
             var waiting: Int32 = scriptNext < script.count ? 20 : 1000
             if let vsync = wayland.vsyncTimeout() { waiting = min(waiting, vsync) }
+            if let repeating = wayland.repeatTimeout() { waiting = min(waiting, repeating) }
             if poll(&fds, 2, waiting) > 0, fds[0].revents & Int16(POLLIN) != 0 {
                 if wl_display_read_events(display) < 0 {
                     Self.report("the Wayland connection is lost: \(String(cString: strerror(errno)))")
