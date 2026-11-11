@@ -60,4 +60,9 @@ done
 # $ANDROID_ROOT/usr/keychars (Android's /system/usr/keychars).
 mkdir -p "$out/usr/keychars"
 cp frameworks/base/data/keyboards/Generic.kcm frameworks/base/data/keyboards/Virtual.kcm "$out/usr/keychars/"
+
+# $ANDROID_ROOT/usr/keylayout (Android's /system/usr/keylayout): evdev
+# scancodes to keycodes, for the Wayland bridge's keyboard.
+mkdir -p "$out/usr/keylayout"
+cp frameworks/base/data/keyboards/Generic.kl "$out/usr/keylayout/"
 ls -lR "$out"
