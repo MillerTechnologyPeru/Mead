@@ -327,6 +327,12 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
     }
 
     @Override
+    public void toggleFreeformWindowingMode(IBinder token) {
+        // The caption's maximize button: the compositor maximizes the window.
+        WindowSession.toggleMaximized(token);
+    }
+
+    @Override
     public boolean shouldUpRecreateTask(IBinder token, String destAffinity) {
         return false;
     }
