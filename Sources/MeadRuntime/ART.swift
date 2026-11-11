@@ -157,6 +157,8 @@ public final class ART {
         // The system services, in-process, and mead.view.MeadWindow's natives,
         // both in mead-framework.
         try startServices()
+        // AudioTrack's natives, over SDL's audio.
+        try registerAudioTrack()
         if let display = ARTDisplay.shared {
             display.registerNatives(env: try virtualMachine.environment())
         }
