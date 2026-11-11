@@ -113,6 +113,13 @@ final class Wayland {
     func logical(_ pixels: Int32) -> Int32 { max((pixels + scale - 1) / scale, 1) }
     /// A position in pixels in logical pixels.
     func logicalPosition(_ pixels: Int32) -> Int32 { Int32((Double(pixels) / Double(scale)).rounded(.down)) }
+
+    /// Points the window's content viewport at its size on screen: its
+    /// buffer's, or a layer's as its matrix scales it.
+    private func setContentDestination(_ window: ARTDisplay.Window) {
+        let size = window.shownSize ?? (max(window.width, 1), max(window.height, 1))
+        wp_viewport_set_destination(window.layerViewport, logical(size.width), logical(size.height))
+    }
     /// Wayland's logical coordinate in pixels.
     func pixels(_ value: wl_fixed_t) -> Float { Float(wl_fixed_to_double(value)) * Float(scale) }
 
@@ -320,21 +327,23 @@ final class Wayland {
         wl_surface_set_input_region(layer, region)
         wl_region_destroy(region)
         window.layerViewport = wp_viewporter_get_viewport(viewporter, layer)
-        wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
+        setContentDestination(window)
         window.eglWindow = wl_egl_window_create(layer, max(window.width, 1), max(window.height, 1))
         wl_surface_commit(root)
         return true
     }
 
-    /// A transaction's state for a layer: its place in its window, its size,
-    /// its order against the window's content, and whether it shows.
-    func updateLayer(_ window: ARTDisplay.Window, x: Int32, y: Int32, width: Int32, height: Int32, z: Int32,
-                     shown: Bool) {
+    /// A transaction's state for a layer: its place in its window, its
+    /// buffer's size and its size on screen, its order against the window's
+    /// content, and whether it shows.
+    func updateLayer(_ window: ARTDisplay.Window, x: Int32, y: Int32, width: Int32, height: Int32, shownWidth: Int32,
+                     shownHeight: Int32, z: Int32, shown: Bool) {
         var host = window.parent
         while let candidate = host, candidate.kind == .layer { host = candidate.parent }
         guard let host, let root = host.root, let content = host.layer, let layer = window.layer,
               let subsurface = window.subsurface else { return }
-        ARTDisplay.report("layer \(window.id) in window \(host.id): \(x),\(y) \(width)×\(height), z \(z), \(shown ? "shown" : "hidden")")
+        let scaled = shownWidth != width || shownHeight != height ? " shown at \(shownWidth)×\(shownHeight)" : ""
+        ARTDisplay.report("layer \(window.id) in window \(host.id): \(x),\(y) \(width)×\(height)\(scaled), z \(z), \(shown ? "shown" : "hidden")")
         window.x = x
         window.y = y
         wl_subsurface_set_position(subsurface, logicalPosition(x), logicalPosition(y))
@@ -346,8 +355,16 @@ final class Wayland {
                 wl_subsurface_place_above(subsurface, content)
             }
         }
-        if width > 0, height > 0, width != window.width || height != window.height {
+        let shownSize = shownWidth > 0 && shownHeight > 0 && (shownWidth != width || shownHeight != height)
+            ? (width: shownWidth, height: shownHeight) : nil
+        let resized = width > 0 && height > 0 && (width != window.width || height != window.height)
+        let rescaled = shownSize?.width != window.shownSize?.width || shownSize?.height != window.shownSize?.height
+        window.shownSize = shownSize
+        if resized {
             bridge.resize(window, width: width, height: height)
+        } else if rescaled {
+            setContentDestination(window)
+            wl_surface_commit(layer)
         }
         if shown != window.layerShown {
             window.layerShown = shown
@@ -439,7 +456,7 @@ final class Wayland {
     func resizeSurfaces(_ window: ARTDisplay.Window) {
         let width = max(window.width, 1), height = max(window.height, 1)
         wp_viewport_set_destination(window.rootViewport, logical(width), logical(height))
-        wp_viewport_set_destination(window.layerViewport, logical(width), logical(height))
+        setContentDestination(window)
         if let eglWindow = window.eglWindow {
             wl_egl_window_resize(eglWindow, width, height, 0, 0)
         }
@@ -781,7 +798,7 @@ final class Wayland {
         }
         wl_surface_attach(layer, held!.buffer, 0, 0)
         wl_surface_damage_buffer(layer, 0, 0, width, height)
-        wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
+        setContentDestination(window)
         wl_surface_commit(layer)
     }
 
