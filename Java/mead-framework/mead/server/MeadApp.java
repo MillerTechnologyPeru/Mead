@@ -248,7 +248,10 @@ public final class MeadApp {
         Rect bounds = new Rect(0, 0, width, height);
         config.windowConfiguration.setBounds(bounds);
         config.windowConfiguration.setAppBounds(bounds);
-        config.windowConfiguration.setWindowingMode(WindowConfiguration.WINDOWING_MODE_FULLSCREEN);
+        // Freeform, with Android's caption on activities, where the
+        // compositor draws no decorations; else fullscreen.
+        config.windowConfiguration.setWindowingMode(WindowManagerService.wantsCaptions()
+                ? WindowConfiguration.WINDOWING_MODE_FREEFORM : WindowConfiguration.WINDOWING_MODE_FULLSCREEN);
         config.windowConfiguration.setActivityType(WindowConfiguration.ACTIVITY_TYPE_STANDARD);
         return config;
     }
