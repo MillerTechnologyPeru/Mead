@@ -32,6 +32,14 @@ final class InputManagerService extends InputManagerBase {
     /** SDL's IDs for the gamepads open. */
     static native int[] nativeGamepads();
 
+    /** Shows the pointer as one of PointerIcon's types (over text, a link). */
+    static native void nativeSetPointerIcon(int type);
+
+    @Override
+    public void setPointerIconType(int iconId) {
+        nativeSetPointerIcon(iconId);
+    }
+
     private final SparseArray<InputDevice> mDevices = new SparseArray<>();
     private final List<IInputDevicesChangedListener> mListeners = new ArrayList<>();
 
