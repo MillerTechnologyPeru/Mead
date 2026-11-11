@@ -17,6 +17,7 @@ import android.os.SystemProperties;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,9 @@ public final class MeadApp {
     private final Map<String, Activity> mActivities = new LinkedHashMap<>();
     /** The permissions the manifest asks for. */
     final List<String> requestedPermissions;
+    /** Its split APKs' names and paths (an asset pack is one); none for a dex. */
+    private final String[] mSplitNames;
+    private final String[] mSplitPaths;
 
     static volatile MeadApp sCurrent;
 
@@ -63,6 +67,7 @@ public final class MeadApp {
         this.width = width;
         this.height = height;
         requestedPermissions = Collections.emptyList();
+        mSplitNames = mSplitPaths = new String[0];
         mApplication = new ApplicationInfo();
         mApplication.packageName = packageName;
         mApplication.targetSdkVersion = 29;
@@ -91,6 +96,13 @@ public final class MeadApp {
         this.width = width;
         this.height = height;
         requestedPermissions = new ArrayList<>(parsed.requestedPermissions);
+        List<PackageParser.ApkLite> splits = splits(sourcePath, packageName);
+        mSplitNames = new String[splits.size()];
+        mSplitPaths = new String[splits.size()];
+        for (int index = 0; index < splits.size(); index++) {
+            mSplitNames[index] = splits.get(index).splitName;
+            mSplitPaths[index] = splits.get(index).codePath;
+        }
         mApplication = parsed.applicationInfo;
         String launcher = null;
         for (PackageParser.Activity activity : parsed.activities) {
@@ -106,6 +118,33 @@ public final class MeadApp {
         }
         if (launcher == null) throw new IllegalArgumentException(sourcePath + " has no launcher activity");
         activityName = launcher;
+    }
+
+    /**
+     * An APK's splits, as a bundle's install leaves them beside it: the other
+     * APKs in its directory whose manifests name its package and a split,
+     * in their names' order, as the package manager keeps them.
+     */
+    private static List<PackageParser.ApkLite> splits(String sourcePath, String packageName) {
+        List<PackageParser.ApkLite> splits = new ArrayList<>();
+        File[] files = new File(sourcePath).getParentFile().listFiles();
+        if (files == null) return splits;
+        for (File file : files) {
+            if (!file.getName().endsWith(".apk") || file.getAbsolutePath().equals(sourcePath)) continue;
+            try {
+                PackageParser.ApkLite lite = PackageParser.parseApkLite(file, 0);
+                if (packageName.equals(lite.packageName) && lite.splitName != null) splits.add(lite);
+            } catch (PackageParser.PackageParserException e) {
+                // Not an APK of its.
+            }
+        }
+        Collections.sort(splits, new Comparator<PackageParser.ApkLite>() {
+            @Override
+            public int compare(PackageParser.ApkLite left, PackageParser.ApkLite right) {
+                return left.splitName.compareTo(right.splitName);
+            }
+        });
+        return splits;
     }
 
     /**
@@ -158,6 +197,12 @@ public final class MeadApp {
         info.packageName = packageName;
         if (info.processName == null) info.processName = packageName;
         info.sourceDir = info.publicSourceDir = sourcePath;
+        // LoadedApk adds splits to the app's resources and class path.
+        if (mSplitPaths.length > 0) {
+            info.splitNames = mSplitNames.clone();
+            info.splitSourceDirs = mSplitPaths.clone();
+            info.splitPublicSourceDirs = mSplitPaths.clone();
+        }
         info.dataDir = info.credentialProtectedDataDir = info.deviceProtectedDataDir = dataDir();
         info.nativeLibraryDir = info.dataDir + "/lib";
         info.uid = Process.myUid();
