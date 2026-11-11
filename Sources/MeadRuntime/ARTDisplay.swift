@@ -1,29 +1,33 @@
 internal import CSwiftJavaJNI
+import CMeadWayland
 import Glibc
 import MeadWindow
 internal import SwiftJavaJNICore
 
-/// Mead's display bridge for ART: SDL windows as the framework's surfaces,
-/// and SDL's input as the framework's input events.
+/// Mead's display bridge for ART: Wayland windows as the framework's
+/// surfaces, and the seat's and SDL's gamepads' input as the framework's
+/// input events.
 ///
 /// Mead's libgui (art_standalone's `frameworks/mead/gui`, interface in
 /// `mead/gui.h`) stands where SurfaceFlinger is on Android. This fills it in:
-/// the display it describes, the windowing connection hwui's EGL display is
-/// made on, and for each window a surface whose software frames
-/// (`Surface.lockCanvas`) this copies to the window, and whose native window
-/// hwui's GL pipeline renders to (`Surface.lockHardwareCanvas`,
-/// `HardwareRenderer`). Each window can have an input channel
-/// (`frameworks/mead/android_runtime/include/mead/input.h`), whose client
-/// end an `InputEventReceiver` reads, as an app's window gets from the
-/// window manager; SDL's keys, mouse, touches and gamepads arrive on it as
-/// `KeyEvent`s and `MotionEvent`s. Choreographer's vsync comes from libgui.
+/// the display it describes (from Wayland's outputs), the windowing
+/// connection hwui's EGL display is made on, and for each window a surface
+/// whose CPU frames (`Surface.lockCanvas`, `ANativeWindow_lock`) are shown in
+/// place as `wl_shm` buffers, and whose `wl_egl_window` hwui's GL pipeline
+/// renders to. The Wayland client is `Wayland` (ARTWayland.swift). Each window
+/// can have an input channel (`frameworks/mead/android_runtime/include/mead/input.h`),
+/// whose client end an `InputEventReceiver` reads, as an app's window gets
+/// from the window manager; the keyboard (mapped by Android's `Generic.kl`),
+/// the pointer, touches and gamepads arrive on it as `KeyEvent`s and
+/// `MotionEvent`s. Choreographer's vsync comes from frame callbacks.
 ///
-/// SDL is all on the bridge's own thread, which makes the windows and pumps
-/// their events, so that Java's threads are free to run their loopers.
+/// Wayland is all on the bridge's display thread, which dispatches the
+/// connection and does the work handed to it, so that Java's threads are free
+/// to run their loopers. SDL has a thread of its own, for gamepads and for
+/// the input checks inject, without its video.
 ///
-/// Until the window manager (phase 5) hands out surfaces, Java asks for a
-/// window through `mead.view.MeadWindow`, whose natives this registers when
-/// the app has that class.
+/// Java asks for a window through the window manager service, or through
+/// `mead.view.MeadWindow` for checks; this registers both's natives.
 final class ARTDisplay {
     /// What a window is: a top-level window, a dialog over its parent, or a
     /// popup (a menu, a dropdown) at a place in its parent.
@@ -40,6 +44,10 @@ final class ARTDisplay {
         typealias CreateSurface = @convention(c) (UInt32, UInt32, Int32, UnsafeRawPointer) -> UnsafeMutableRawPointer?
         typealias SetNativeWindow = @convention(c) (UnsafeMutableRawPointer, UInt) -> Void
         typealias ResizeSurface = @convention(c) (UnsafeMutableRawPointer, UInt32, UInt32) -> Void
+        typealias ReleaseBuffer = @convention(c) (UnsafeMutableRawPointer, Int32) -> Void
+        typealias Vsync = @convention(c) (Int64) -> Void
+        typealias VsyncRequest = @convention(c) (UnsafeMutableRawPointer?) -> Void
+        typealias SetVsyncRequest = @convention(c) (VsyncRequest, UnsafeMutableRawPointer?) -> Void
         typealias SurfaceToJava = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, UnsafeMutableRawPointer) -> jobject?
         typealias SurfaceFromJava = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> UnsafeMutableRawPointer?
         typealias SetWindowCallbacks = @convention(c) (UnsafeRawPointer) -> Void
@@ -47,20 +55,25 @@ final class ARTDisplay {
         typealias SendKey = @convention(c) (OpaquePointer, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int64) -> Int32
         typealias SendMotion = @convention(c) (OpaquePointer, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int64, Int64,
                                                UInt32, UnsafePointer<Int32>, UnsafePointer<Int32>, UInt64, UnsafePointer<Float>) -> Int32
+        typealias MapKey = @convention(c) (Int32) -> Int32
+        typealias InputFromChannel = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> OpaquePointer?
+        typealias SurfaceControlCreate = @convention(c) (UnsafeMutableRawPointer) -> Int64
 
         let setDisplay: SetDisplay
         let setNativeDisplay: SetNativeDisplay
         let createSurface: CreateSurface
         let setNativeWindow: SetNativeWindow
         let resizeSurface: ResizeSurface
+        let releaseBuffer: ReleaseBuffer
+        let vsync: Vsync
+        let setVsyncRequest: SetVsyncRequest
         let surfaceToJava: SurfaceToJava
         let surfaceFromJava: SurfaceFromJava
         let setWindowCallbacks: SetWindowCallbacks
         let openInput: OpenInput
         let sendKey: SendKey
         let sendMotion: SendMotion
-        typealias InputFromChannel = @convention(c) (UnsafeMutablePointer<JNIEnv?>?, jobject?) -> OpaquePointer?
-        typealias SurfaceControlCreate = @convention(c) (UnsafeMutableRawPointer) -> Int64
+        let mapKey: MapKey
         let inputFromChannel: InputFromChannel
         let surfaceControlCreate: SurfaceControlCreate
 
@@ -74,12 +87,16 @@ final class ARTDisplay {
             createSurface = try symbol(gui, "mead_surface_create")
             setNativeWindow = try symbol(gui, "mead_surface_set_native_window")
             resizeSurface = try symbol(gui, "mead_surface_resize")
+            releaseBuffer = try symbol(gui, "mead_surface_release_buffer")
+            vsync = try symbol(gui, "mead_gui_vsync")
+            setVsyncRequest = try symbol(gui, "mead_gui_set_vsync_request")
             surfaceToJava = try symbol(runtime, "mead_surface_to_java")
             surfaceFromJava = try symbol(runtime, "mead_surface_from_java")
             setWindowCallbacks = try symbol(gui, "mead_gui_set_window_callbacks")
             openInput = try symbol(runtime, "mead_input_open")
             sendKey = try symbol(runtime, "mead_input_send_key")
             sendMotion = try symbol(runtime, "mead_input_send_motion")
+            mapKey = try symbol(runtime, "mead_input_map_key")
             inputFromChannel = try symbol(runtime, "mead_input_from_channel")
             surfaceControlCreate = try symbol(runtime, "mead_surface_control_create")
         }
@@ -87,97 +104,76 @@ final class ARTDisplay {
 
     /// A window, the surface drawing to it and the input channel reading it.
     final class Window {
-        let handle: SDL.Pointer
         let id: UInt32
-        let native: SDLNativeWindow?
+        let kind: WindowKind
+        let parent: Window?
+        /// Its place in its parent (a popup's) and its size, in pixels.
+        var x: Int32
+        var y: Int32
+        var width: Int32
+        var height: Int32
+        var pixelWidth: Int32 { width }
+        var pixelHeight: Int32 { height }
+
+        // Its Wayland objects (see Wayland).
+        var root: OpaquePointer?
+        var xdgSurface: OpaquePointer?
+        var toplevel: OpaquePointer?
+        var popup: OpaquePointer?
+        var decoration: OpaquePointer?
+        var rootViewport: OpaquePointer?
+        var layer: OpaquePointer?
+        var subsurface: OpaquePointer?
+        var layerViewport: OpaquePointer?
+        var eglWindow: OpaquePointer?
+        var configured = false
+        var mapped = false
+        /// The size a toplevel's last configure asked for.
+        var pendingSize: (width: Int32, height: Int32)?
+
+        /// A gralloc buffer as a wl_buffer, by its libgui slot.
+        struct HeldBuffer {
+            let fd: Int32
+            let width: Int32
+            let height: Int32
+            let stride: Int32
+            let format: UInt32
+            let buffer: OpaquePointer
+        }
+
+        var buffers: [Int32: HeldBuffer] = [:]
+
         /// The surface, an ANativeWindow from `mead_surface_create`.
         var surface: UnsafeMutableRawPointer?
         /// The input channel's server end, from `mead_input_open`.
         var input: OpaquePointer?
-        var pixelWidth: Int32 = 0
-        var pixelHeight: Int32 = 0
-        /// Pixels per SDL point, what SDL's mouse positions are in.
-        var pixelsPerPoint: Float = 1
 
         // The display thread's input state.
-        var keyDownTimes: [UInt32: Int64] = [:]
+        var keyDownTimes: [Int32: Int64] = [:]
         var mouseButtons: Int32 = 0
         var mouseDownTime: Int64 = 0
-        var fingers: [(sdl: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
+        var fingers: [(source: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
         var touchDownTime: Int64 = 0
 
-        // The latest software frame, handed from the thread queuing it to
-        // the display thread.
-        private var frameLock = pthread_mutex_t()
-        private var frame: [UInt8] = []
-        private var frameWidth: UInt32 = 0
-        private var frameHeight: UInt32 = 0
-        private var framePending = false
-        private var frames = 0
+        /// Frames presented, for MEAD_FRAME_DUMP.
+        var frames = 0
 
-        init(handle: SDL.Pointer) {
-            self.handle = handle
-            id = SDL.getWindowID(handle)
-            native = SDLNativeWindow(handle)
-            pthread_mutex_init(&frameLock, nil)
-            measure()
-        }
-
-        func measure() {
-            var width: Int32 = 0, height: Int32 = 0, points: Int32 = 0, pointHeight: Int32 = 0
-            _ = SDL.getWindowSizeInPixels(handle, &width, &height)
-            _ = SDL.getWindowSize(handle, &points, &pointHeight)
-            pixelWidth = width
-            pixelHeight = height
-            pixelsPerPoint = points > 0 ? Float(width) / Float(points) : 1
-        }
-
-        /// A software frame, in Android's RGBA 8888 or RGBX 8888: kept for the
-        /// display thread to copy to the window. True when the display thread
-        /// should be asked to.
-        func queue(_ pixels: UnsafeRawPointer, width: UInt32, height: UInt32, stride: UInt32, format: Int32) -> Bool {
-            defer { frames += 1 }
-            // HAL_PIXEL_FORMAT_RGBA_8888 and RGBX_8888: R, G, B, A in memory.
-            guard format == 1 || format == 2 else { return false }
-            if frames % 60 == 0, let path = getenv("MEAD_FRAME_DUMP") {
-                Self.dump(pixels, width: width, height: height, stride: stride, to: String(cString: path))
-            }
-            pthread_mutex_lock(&frameLock)
-            defer { pthread_mutex_unlock(&frameLock) }
-            let rowBytes = Int(width) * 4
-            frame = [UInt8](repeating: 0, count: rowBytes * Int(height))
-            frame.withUnsafeMutableBytes { target in
-                for row in 0..<Int(height) {
-                    memcpy(target.baseAddress! + row * rowBytes, pixels + row * Int(stride) * 4, rowBytes)
-                }
-            }
-            frameWidth = width
-            frameHeight = height
-            let ask = !framePending
-            framePending = true
-            return ask
-        }
-
-        /// On the display thread: the latest frame, copied to the window.
-        func present() {
-            pthread_mutex_lock(&frameLock)
-            let pixels = frame, width = frameWidth, height = frameHeight
-            framePending = false
-            pthread_mutex_unlock(&frameLock)
-            guard !pixels.isEmpty, let target = SDL.getWindowSurface(handle) else { return }
-            let copyWidth = min(Int32(width), target.pointee.w)
-            let copyHeight = min(Int32(height), target.pointee.h)
-            pixels.withUnsafeBytes { source in
-                _ = SDL.convertPixels(copyWidth, copyHeight, MEAD_SDL_PIXELFORMAT_ABGR8888, source.baseAddress, Int32(width) * 4,
-                                      target.pointee.format, target.pointee.pixels, target.pointee.pitch)
-            }
-            _ = SDL.updateWindowSurface(handle)
+        init(id: UInt32, kind: WindowKind, parent: Window?, x: Int32, y: Int32, width: Int32, height: Int32) {
+            self.id = id
+            self.kind = kind
+            self.parent = parent
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
         }
 
         /// MEAD_FRAME_DUMP=path: the frame as a binary PPM, every 60 frames
         /// from the first, as Mead's EGL provider and hwui write theirs.
-        private static func dump(_ pixels: UnsafeRawPointer, width: UInt32, height: UInt32, stride: UInt32, to path: String) {
-            guard let file = fopen(path, "wb") else { return }
+        func dump(_ pixels: UnsafeRawPointer, width: UInt32, height: UInt32, stride: UInt32) {
+            defer { frames += 1 }
+            guard frames % 60 == 0, let variable = getenv("MEAD_FRAME_DUMP"),
+                  let file = fopen(String(cString: variable), "wb") else { return }
             defer { fclose(file) }
             fputs("P6\n\(width) \(height)\n255\n", file)
             var row = [UInt8](repeating: 0, count: Int(width) * 3)
@@ -194,10 +190,12 @@ final class ARTDisplay {
     }
 
     let functions: Functions
+    /// The Wayland connection, once the display thread has made it.
+    private(set) var wayland: Wayland?
     /// The windows, which only the display thread changes.
     var windows: [Window] = []
     private var windowsLock = pthread_mutex_t()
-    private var displayDescribed = false
+    private var nextWindowID: UInt32 = 1
     var focusedWindowID: UInt32 = 0
     var gamepads: [UInt32: SDL.Pointer] = [:]
     var gamepadAxes: [UInt32: [Int32: Float]] = [:]
@@ -207,8 +205,8 @@ final class ARTDisplay {
     private var started = false
     private var queueLock = pthread_mutex_t()
     private var queued: [() -> Void] = []
-    /// SDL's event type that wakes the display thread for queued work.
-    private var wakeEvent: UInt32 = 0
+    /// A pipe whose writes wake the display thread for queued work.
+    private var wake: [Int32] = [-1, -1]
     private var startFailure: String?
     /// MEAD_DEBUG_TAPS's steps, the next to play, and when the first window
     /// was made (CLOCK_MONOTONIC seconds).
@@ -249,9 +247,8 @@ final class ARTDisplay {
         pthread_mutex_lock(&queueLock)
         queued.append(work)
         pthread_mutex_unlock(&queueLock)
-        var event = mead_sdl_event()
-        event.type = wakeEvent
-        _ = SDL.pushEvent(&event)
+        var byte: UInt8 = 1
+        _ = Glibc.write(wake[1], &byte, 1)
     }
 
     private func startThread() -> Bool {
@@ -259,6 +256,11 @@ final class ARTDisplay {
         defer { pthread_mutex_unlock(&queueLock) }
         if started { return startFailure == nil }
         started = true
+        guard pipe(&wake) == 0 else {
+            startFailure = "no pipe for the display thread"
+            return false
+        }
+        _ = fcntl(wake[0], F_SETFL, O_NONBLOCK)
         let ready = Completion<String?>()
         let context = Unmanaged.passRetained(Box((self, ready))).toOpaque()
         let result = pthread_create(&thread, nil, { context in
@@ -273,27 +275,40 @@ final class ARTDisplay {
         }
         pthread_mutex_unlock(&queueLock)
         startFailure = ready.wait() ?? nil
+        if startFailure == nil {
+            startInputThread()
+        }
         pthread_mutex_lock(&queueLock)
         if let startFailure { Self.report(startFailure) }
         return startFailure == nil
     }
 
     private func run(ready: Completion<String?>) {
-        guard SDL.loadOnce(),
-              SDL.initialize(UInt32(MEAD_SDL_INIT_VIDEO) | UInt32(MEAD_SDL_INIT_EVENTS) | UInt32(MEAD_SDL_INIT_GAMEPAD)) else {
-            ready.finish("SDL: \(SDL.lastError)")
+        guard let wayland = Wayland(bridge: self) else {
+            ready.finish("no Wayland compositor (WAYLAND_DISPLAY)")
             return
         }
-        wakeEvent = SDL.registerEvents(1)
+        if let missing = wayland.missing {
+            ready.finish("the Wayland compositor has no \(missing)")
+            return
+        }
+        self.wayland = wayland
+        functions.setNativeDisplay(2, UnsafeMutableRawPointer(wayland.display))  // MEAD_GUI_NATIVE_WAYLAND
+        describeDisplay()
+        // Choreographer's vsync, on request, from frame callbacks.
+        // The bridge itself is the context: libgui may ask before
+        // ARTDisplay.shared is set, and the bridge lives as long as the process.
+        functions.setVsyncRequest({ context in
+            let display = Unmanaged<ARTDisplay>.fromOpaque(context!).takeUnretainedValue()
+            display.enqueue { display.wayland?.wantVsync() }
+        }, Unmanaged.passUnretained(self).toOpaque())
         script = Self.parseScript(getenv("MEAD_DEBUG_TAPS").map { String(cString: $0) } ?? "")
         ready.finish(nil)
-        var event = mead_sdl_event()
+
+        let display = wayland.display
+        var fds = [pollfd(fd: wayland.fileDescriptor, events: Int16(POLLIN), revents: 0),
+                   pollfd(fd: wake[0], events: Int16(POLLIN), revents: 0)]
         while true {
-            if SDL.waitEventTimeout(&event, 100) {
-                if event.type != wakeEvent {
-                    handle(event)
-                }
-            }
             pthread_mutex_lock(&queueLock)
             let work = queued
             queued.removeAll()
@@ -301,6 +316,59 @@ final class ARTDisplay {
             work.forEach { $0() }
             if scriptNext < script.count, let start = scriptStart {
                 playScript(elapsed: Double(Self.now()) / 1e9 - start)
+            }
+
+            // Wayland's reading, as threads sharing a connection do it.
+            while wl_display_prepare_read(display) != 0 {
+                _ = wl_display_dispatch_pending(display)
+            }
+            _ = wl_display_flush(display)
+            fds[0].revents = 0
+            fds[1].revents = 0
+            var waiting: Int32 = scriptNext < script.count ? 20 : 1000
+            if let vsync = wayland.vsyncTimeout() { waiting = min(waiting, vsync) }
+            if poll(&fds, 2, waiting) > 0, fds[0].revents & Int16(POLLIN) != 0 {
+                if wl_display_read_events(display) < 0 {
+                    Self.report("the Wayland connection is lost: \(String(cString: strerror(errno)))")
+                    return
+                }
+            } else {
+                wl_display_cancel_read(display)
+            }
+            _ = wl_display_dispatch_pending(display)
+            if fds[1].revents & Int16(POLLIN) != 0 {
+                var drained = [UInt8](repeating: 0, count: 64)
+                while Glibc.read(wake[0], &drained, drained.count) > 0 {}
+            }
+        }
+    }
+
+    /// SDL's thread: gamepads, and the keys and touches checks inject, each
+    /// handed to the display thread.
+    private func startInputThread() {
+        let ready = Completion<Bool>()
+        var sdlThread = pthread_t()
+        let context = Unmanaged.passRetained(Box((self, ready))).toOpaque()
+        let result = pthread_create(&sdlThread, nil, { context in
+            let box = Unmanaged<Box<(ARTDisplay, Completion<Bool>)>>.fromOpaque(context!).takeRetainedValue()
+            box.value.0.runInput(ready: box.value.1)
+            return nil
+        }, context)
+        if result == 0 { _ = ready.wait() }
+    }
+
+    private func runInput(ready: Completion<Bool>) {
+        guard SDL.loadOnce(), SDL.initialize(UInt32(MEAD_SDL_INIT_EVENTS) | UInt32(MEAD_SDL_INIT_GAMEPAD)) else {
+            Self.report("no gamepads: SDL: \(SDL.lastError)")
+            ready.finish(false)
+            return
+        }
+        ready.finish(true)
+        var event = mead_sdl_event()
+        while true {
+            if SDL.waitEventTimeout(&event, 1000) {
+                let received = event
+                enqueue { [self] in handle(received) }
             }
         }
     }
@@ -316,7 +384,6 @@ final class ARTDisplay {
         if let focused = window(id: focusedWindowID) { return focused }
         pthread_mutex_lock(&windowsLock)
         defer { pthread_mutex_unlock(&windowsLock) }
-        // The newest window, as the window manager focuses it.
         return windows.last
     }
 
@@ -348,63 +415,56 @@ final class ARTDisplay {
     func createWindow(title: String, width: Int32, height: Int32, kind: WindowKind = .normal, parent: Window? = nil,
                       x: Int32 = 0, y: Int32 = 0) -> Window? {
         let made: Window?? = onDisplayThread { [self] in
-            var created: SDL.Pointer?
-            switch (kind, parent) {
-            case (.popup, let parent?):
-                // In the parent's points, from its top left.
-                let scale = parent.pixelsPerPoint
-                created = SDL.createPopupWindow(parent.handle, Int32(Float(x) / scale), Int32(Float(y) / scale),
-                                                Int32(Float(width) / scale), Int32(Float(height) / scale),
-                                                MEAD_SDL_WINDOW_POPUP_MENU)
-            case (.dialog, let parent?):
-                created = SDL.createWindow(title, width, height, 0)
-                if let created {
-                    _ = SDL.setWindowParent(created, parent.handle)
-                    _ = SDL.setWindowModal(created, true)
-                }
-            default:
-                created = SDL.createWindow(title, width, height, 0)
-            }
-            guard let handle = created else {
-                Self.report("no window: \(SDL.lastError)")
+            guard let wayland else { return nil }
+            let window = Window(id: nextWindowID, kind: kind, parent: parent, x: x, y: y, width: width, height: height)
+            nextWindowID += 1
+            guard wayland.makeSurfaces(for: window, title: title) else {
+                Self.report("the compositor made no window")
+                wayland.destroySurfaces(window)
                 return nil
             }
-            let window = Window(handle: handle)
-            describeDisplay(for: window)
             if scriptStart == nil { scriptStart = Double(Self.now()) / 1e9 }
             return window
         }
         guard let made, let window = made else { return nil }
 
-        // MeadSurfaceCallbacks: the context, then present.
-        typealias Present = @convention(c) (UnsafeMutableRawPointer?, UnsafeRawPointer?, UInt32, UInt32, UInt32, Int32) -> Void
-        let present: Present = { context, pixels, width, height, stride, format in
-            guard let context, let pixels, let display = ARTDisplay.shared else { return }
+        // MeadSurfaceCallbacks: the context, present (unused), presentBuffer.
+        typealias PresentBuffer = @convention(c) (UnsafeMutableRawPointer?, Int32, Int32, UInt32, UInt32, UInt32, Int32,
+                                                  UnsafeRawPointer?) -> Void
+        let presentBuffer: PresentBuffer = { context, slot, fd, width, height, stride, format, pixels in
+            guard let context, let display = ARTDisplay.shared else { return }
             let window = Unmanaged<Window>.fromOpaque(context).takeUnretainedValue()
-            if window.queue(pixels, width: width, height: height, stride: stride, format: format) {
-                display.enqueue { window.present() }
+            if let pixels { window.dump(pixels, width: width, height: height, stride: stride) }
+            display.enqueue {
+                display.wayland?.attach(window, slot: slot, fd: fd, width: Int32(width), height: Int32(height),
+                                        stride: Int32(stride), format: format)
             }
         }
-        let callbacks = UnsafeMutableRawPointer.allocate(byteCount: 2 * MemoryLayout<UnsafeRawPointer>.size,
-                                                         alignment: MemoryLayout<UnsafeRawPointer>.alignment)
-        defer { callbacks.deallocate() }
-        callbacks.storeBytes(of: Unmanaged.passUnretained(window).toOpaque(), as: UnsafeMutableRawPointer.self)
-        callbacks.storeBytes(of: unsafeBitCast(present, to: UnsafeRawPointer.self),
-                             toByteOffset: MemoryLayout<UnsafeRawPointer>.size, as: UnsafeRawPointer.self)
+        let callbacks: [UnsafeRawPointer?] = [UnsafeRawPointer(Unmanaged.passUnretained(window).toOpaque()), nil,
+                                              unsafeBitCast(presentBuffer, to: UnsafeRawPointer.self)]
         // HAL_PIXEL_FORMAT_RGBA_8888.
-        guard let surface = functions.createSurface(UInt32(window.pixelWidth), UInt32(window.pixelHeight), 1, callbacks) else {
+        let surface = callbacks.withUnsafeBytes {
+            functions.createSurface(UInt32(max(window.width, 1)), UInt32(max(window.height, 1)), 1, $0.baseAddress!)
+        }
+        guard let surface else {
             Self.report("no surface for the window")
-            enqueue { SDL.destroyWindow(window.handle) }
+            enqueue { [self] in wayland?.destroySurfaces(window) }
             return nil
         }
         window.surface = surface
-        if let native = window.native {
-            functions.setNativeWindow(surface, native.eglWindow)
+        if let eglWindow = window.eglWindow {
+            functions.setNativeWindow(surface, UInt(bitPattern: Int(bitPattern: UnsafeMutableRawPointer(eglWindow))))
         }
         pthread_mutex_lock(&windowsLock)
         windows.append(window)
         pthread_mutex_unlock(&windowsLock)
         return window
+    }
+
+    /// Hands back a buffer the compositor released. On the display thread.
+    func release(_ window: Window, slot: Int32) {
+        guard let surface = window.surface else { return }
+        functions.releaseBuffer(surface, slot)
     }
 
     /// Closes the window whose surface `surface` is; its SurfaceControl is
@@ -415,10 +475,20 @@ final class ARTDisplay {
         let window = index.map { windows.remove(at: $0) }
         pthread_mutex_unlock(&windowsLock)
         guard let window else { return }
-        enqueue {
+        enqueue { [self] in
             window.surface = nil
-            SDL.destroyWindow(window.handle)
+            wayland?.destroySurfaces(window)
         }
+    }
+
+    /// The compositor asked to close a window (its title bar's button): as
+    /// Android's back key, which finishes an activity.
+    func closeRequested(_ window: Window) {
+        guard let input = window.input else { return }
+        let time = Self.now()
+        let back: Int32 = 4  // KEYCODE_BACK
+        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, Android.keyDown, 0, back, 0, 0, 0, time, time)
+        _ = functions.sendKey(input, Android.keyboard, Android.sourceKeyboard, Android.keyUp, 0, back, 0, 0, 0, time, time)
     }
 
     /// Makes the windows of the window manager's SurfaceControls, through
@@ -455,52 +525,47 @@ final class ARTDisplay {
         return client
     }
 
-    /// The display and windowing connection libgui reports, from the first
-    /// window's. On the display thread.
-    private func describeDisplay(for window: Window) {
-        guard !displayDescribed else { return }
-        displayDescribed = true
-        if let native = window.native {
-            functions.setNativeDisplay(native.kind.rawValue, native.display)
+    /// The display libgui reports, from Wayland's first output. On the
+    /// display thread.
+    private func describeDisplay() {
+        guard let output = wayland?.outputs.first, output.width > 0, output.height > 0 else { return }
+        let scale = Float(max(output.scale, 1))
+        // Dots per inch from the output's physical size, when it has one.
+        func dpi(_ pixels: Int32, _ millimeters: Int32) -> Float {
+            millimeters > 0 ? Float(pixels) * 25.4 / Float(millimeters) : 160 * scale
         }
-        let display = SDL.getPrimaryDisplay()
-        guard display != 0, let mode = SDL.getCurrentDisplayMode(display) else { return }
-        let scale = max(SDL.getDisplayContentScale(display), 1)
         // MeadDisplay: width and height in pixels, xdpi, ydpi, refresh rate,
         // and density (1 at 160 dpi).
         var described = [UInt32](repeating: 0, count: 6)
-        described[0] = UInt32(mode.pointee.w)
-        described[1] = UInt32(mode.pointee.h)
-        described[2] = (160 * scale).bitPattern
-        described[3] = (160 * scale).bitPattern
-        described[4] = (mode.pointee.refresh_rate > 0 ? mode.pointee.refresh_rate : 60).bitPattern
+        described[0] = UInt32(output.width)
+        described[1] = UInt32(output.height)
+        described[2] = dpi(output.width, output.millimetersWide).bitPattern
+        described[3] = dpi(output.height, output.millimetersHigh).bitPattern
+        described[4] = (output.refresh > 0 ? Float(output.refresh) / 1000 : 60).bitPattern
         described[5] = scale.bitPattern
         described.withUnsafeBytes { functions.setDisplay($0.baseAddress!) }
     }
 
-    /// A window's new size, from SDL. On the display thread.
     /// A window's position (a popup's, in its parent) and size, in pixels.
     func setFrame(_ window: Window, x: Int32, y: Int32, width: Int32, height: Int32, popup: Bool) {
         _ = onDisplayThread { [self] in
-            let scale = window.pixelsPerPoint
-            if popup {
-                _ = SDL.setWindowPosition(window.handle, Int32(Float(x) / scale), Int32(Float(y) / scale))
+            let moved = popup && (x != window.x || y != window.y)
+            window.x = x
+            window.y = y
+            if width != window.width || height != window.height {
+                resize(window, width: width, height: height)
             }
-            if width != window.pixelWidth || height != window.pixelHeight {
-                _ = SDL.setWindowSize(window.handle, Int32(Float(width) / scale), Int32(Float(height) / scale))
-                resized(window)
-            }
+            if moved { wayland?.reposition(window) }
         }
     }
 
-    /// Shows a window, raised, or hides it.
+    /// Shows a window, or hides it.
     func setShown(_ window: Window, _ shown: Bool) {
-        _ = onDisplayThread {
+        _ = onDisplayThread { [self] in
             if shown {
-                _ = SDL.showWindow(window.handle)
-                _ = SDL.raiseWindow(window.handle)
+                wayland?.map(window)
             } else {
-                _ = SDL.hideWindow(window.handle)
+                wayland?.unmap(window)
             }
         }
     }
@@ -512,11 +577,14 @@ final class ARTDisplay {
         _ = onDisplayThread { window.input = input }
     }
 
-    func resized(_ window: Window) {
-        window.measure()
-        window.native?.resize(width: window.pixelWidth, height: window.pixelHeight)
+    /// A window's new size: its surfaces, and libgui's surface's buffers. On
+    /// the display thread.
+    func resize(_ window: Window, width: Int32, height: Int32) {
+        window.width = width
+        window.height = height
+        wayland?.resizeSurfaces(window)
         if let surface = window.surface {
-            functions.resizeSurface(surface, UInt32(window.pixelWidth), UInt32(window.pixelHeight))
+            functions.resizeSurface(surface, UInt32(max(width, 1)), UInt32(max(height, 1)))
         }
     }
 
