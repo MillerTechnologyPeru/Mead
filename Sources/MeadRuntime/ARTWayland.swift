@@ -8,7 +8,7 @@ import Glibc
 /// thread, uses queues of its own on the same connection.
 ///
 /// A window is a root `wl_surface` with an `xdg_toplevel` (or `xdg_popup`),
-/// holding a 1×1 black buffer scaled to the window by its viewport, and a
+/// holding a 1×1 clear buffer scaled to the window by its viewport, and a
 /// layer: a subsurface over it, desynchronized, where the window's libgui
 /// surface is shown. CPU frames are the surface's gralloc buffers, attached
 /// in place as `wl_shm` buffers and handed back to libgui when the
@@ -77,7 +77,7 @@ final class Wayland {
 
     /// The windows, by their root and layer surfaces.
     var windows: [OpaquePointer: ARTDisplay.Window] = [:]
-    /// A 1×1 black buffer for windows' root surfaces, scaled by viewports.
+    /// A 1×1 clear buffer for windows' root surfaces, scaled by viewports.
     private var background: OpaquePointer?
     /// The window whose root surface's frame callbacks are vsync.
     var vsyncWindow: ARTDisplay.Window?
@@ -223,15 +223,17 @@ final class Wayland {
 
     // MARK: Windows
 
-    /// The 1×1 black buffer roots show, scaled to their windows.
+    /// The 1×1 clear buffer roots show, scaled to their windows.
     private func backgroundBuffer() -> OpaquePointer? {
         if let background { return background }
         let fd = mead_wayland_memfd("mead-background")
         guard fd >= 0 else { return nil }
         defer { close(fd) }
         guard ftruncate(fd, 4) == 0 else { return nil }
-        var black: UInt32 = 0xFF00_0000
-        _ = Glibc.write(fd, &black, 4)
+        // Clear: a translucent window (a popup's shadow, a dialog's scrim)
+        // shows what's under it where Android draws nothing.
+        var clear: UInt32 = 0
+        _ = Glibc.write(fd, &clear, 4)
         let pool = wl_shm_create_pool(shm, fd, 4)
         background = wl_shm_pool_create_buffer(pool, 0, 1, 1, 4, UInt32(WL_SHM_FORMAT_ARGB8888.rawValue))
         wl_shm_pool_destroy(pool)
