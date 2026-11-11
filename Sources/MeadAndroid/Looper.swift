@@ -162,47 +162,97 @@ public final class Looper {
     }
 }
 
+/// The thread's android::Looper while ART runs: the one Java's MessageQueue
+/// polls, through libandroid_runtime's C API (mead/looper.h), as Android's
+/// own libandroid has it. Without ART, ALooper is Mead's Looper above.
+struct ARTLooper {
+    typealias ForThread = @convention(c) () -> UnsafeMutableRawPointer?
+    typealias Prepare = @convention(c) (Int32) -> UnsafeMutableRawPointer?
+    typealias Retain = @convention(c) (UnsafeMutableRawPointer) -> Void
+    typealias Poll = @convention(c) (Int32, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<Int32>?, UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32
+    typealias AddFd = @convention(c) (UnsafeMutableRawPointer, Int32, Int32, Int32, LooperCallback?, UnsafeMutableRawPointer?) -> Int32
+    typealias RemoveFd = @convention(c) (UnsafeMutableRawPointer, Int32) -> Int32
+
+    let forThread: ForThread
+    let prepare: Prepare
+    let acquire: Retain
+    let release: Retain
+    let pollOnce: Poll
+    let pollAll: Poll
+    let wake: Retain
+    let addFd: AddFd
+    let removeFd: RemoveFd
+
+    /// The runtime's looper API when ART has loaded libandroid_runtime; an
+    /// app's native code only runs after it has, so the answer is kept.
+    static let shared: ARTLooper? = {
+        guard let library = dlopen("libandroid_runtime.so", RTLD_NOW | RTLD_NOLOAD) else { return nil }
+        func symbol<T>(_ name: String, _: T.Type) -> T? {
+            dlsym(library, name).map { unsafeBitCast($0, to: T.self) }
+        }
+        guard let forThread = symbol("mead_looper_for_thread", ForThread.self),
+              let prepare = symbol("mead_looper_prepare", Prepare.self),
+              let acquire = symbol("mead_looper_acquire", Retain.self),
+              let release = symbol("mead_looper_release", Retain.self),
+              let pollOnce = symbol("mead_looper_poll_once", Poll.self),
+              let pollAll = symbol("mead_looper_poll_all", Poll.self),
+              let wake = symbol("mead_looper_wake", Retain.self),
+              let addFd = symbol("mead_looper_add_fd", AddFd.self),
+              let removeFd = symbol("mead_looper_remove_fd", RemoveFd.self) else { return nil }
+        return ARTLooper(forThread: forThread, prepare: prepare, acquire: acquire, release: release,
+                         pollOnce: pollOnce, pollAll: pollAll, wake: wake, addFd: addFd, removeFd: removeFd)
+    }()
+}
+
 private func looper(_ pointer: UnsafeMutableRawPointer) -> Looper {
     Unmanaged<Looper>.fromOpaque(pointer).takeUnretainedValue()
 }
 
 @_cdecl("ALooper_forThread")
 public func ALooper_forThread() -> UnsafeMutableRawPointer? {
-    Looper.forThread.map { Unmanaged.passUnretained($0).toOpaque() }
+    if let art = ARTLooper.shared { return art.forThread() }
+    return Looper.forThread.map { Unmanaged.passUnretained($0).toOpaque() }
 }
 
 @_cdecl("ALooper_prepare")
 public func ALooper_prepare(_ options: Int32) -> UnsafeMutableRawPointer {
-    Unmanaged.passUnretained(Looper.prepare()).toOpaque()
+    if let art = ARTLooper.shared, let looper = art.prepare(options) { return looper }
+    return Unmanaged.passUnretained(Looper.prepare()).toOpaque()
 }
 
 @_cdecl("ALooper_acquire")
 public func ALooper_acquire(_ pointer: UnsafeMutableRawPointer) {
+    if let art = ARTLooper.shared { return art.acquire(pointer) }
     _ = Unmanaged<Looper>.fromOpaque(pointer).retain()
 }
 
 @_cdecl("ALooper_release")
 public func ALooper_release(_ pointer: UnsafeMutableRawPointer) {
+    if let art = ARTLooper.shared { return art.release(pointer) }
     Unmanaged<Looper>.fromOpaque(pointer).release()
 }
 
 @_cdecl("ALooper_wake")
 public func ALooper_wake(_ pointer: UnsafeMutableRawPointer) {
+    if let art = ARTLooper.shared { return art.wake(pointer) }
     looper(pointer).wake()
 }
 
 @_cdecl("ALooper_addFd")
 public func ALooper_addFd(_ pointer: UnsafeMutableRawPointer, _ fd: Int32, _ ident: Int32, _ events: Int32, _ callback: LooperCallback?, _ data: UnsafeMutableRawPointer?) -> Int32 {
-    looper(pointer).addFd(fd, ident: ident, events: events, callback: callback, data: data)
+    if let art = ARTLooper.shared { return art.addFd(pointer, fd, ident, events, callback, data) }
+    return looper(pointer).addFd(fd, ident: ident, events: events, callback: callback, data: data)
 }
 
 @_cdecl("ALooper_removeFd")
 public func ALooper_removeFd(_ pointer: UnsafeMutableRawPointer, _ fd: Int32) -> Int32 {
-    looper(pointer).removeFd(fd)
+    if let art = ARTLooper.shared { return art.removeFd(pointer, fd) }
+    return looper(pointer).removeFd(fd)
 }
 
 @_cdecl("ALooper_pollOnce")
 public func ALooper_pollOnce(_ timeout: Int32, _ outFd: UnsafeMutablePointer<Int32>?, _ outEvents: UnsafeMutablePointer<Int32>?, _ outData: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    if let art = ARTLooper.shared { return art.pollOnce(timeout, outFd, outEvents, outData) }
     guard let current = Looper.forThread else { return ALOOPER_POLL_ERROR }
     return current.pollOnce(timeout: timeout, outFd: outFd, outEvents: outEvents, outData: outData)
 }
@@ -215,6 +265,7 @@ private func milliseconds() -> Int64 {
 
 @_cdecl("ALooper_pollAll")
 public func ALooper_pollAll(_ timeout: Int32, _ outFd: UnsafeMutablePointer<Int32>?, _ outEvents: UnsafeMutablePointer<Int32>?, _ outData: UnsafeMutablePointer<UnsafeMutableRawPointer?>?) -> Int32 {
+    if let art = ARTLooper.shared { return art.pollAll(timeout, outFd, outEvents, outData) }
     guard let current = Looper.forThread else { return ALOOPER_POLL_ERROR }
     if timeout <= 0 {
         var result: Int32
