@@ -56,4 +56,8 @@ for font in $(grep -oE '>[[:space:]]*[^<>[:space:]]+\.(ttf|ttc|otf)' frameworks/
     [ -n "$found" ] || { echo "no font $font" >&2; exit 1; }
     cp "$found" "$out/fonts/"
 done
+# The key character maps input devices use, from
+# $ANDROID_ROOT/usr/keychars (Android's /system/usr/keychars).
+mkdir -p "$out/usr/keychars"
+cp frameworks/base/data/keyboards/Generic.kcm frameworks/base/data/keyboards/Virtual.kcm "$out/usr/keychars/"
 ls -lR "$out"
