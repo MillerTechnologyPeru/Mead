@@ -682,7 +682,10 @@ hung Unity's render thread with the screen blanked (its pause timed out),
 so Wayland windows swap at interval 0 and Mead paces each swap to the
 app's `eglSwapInterval`, at 60 Hz for now (the EGL shim doesn't know the
 display's rate). With both, Defense Zone 2 HD pauses cleanly when the
-screen blanks. Not yet seen: resuming when it wakes. Missing for it: the clipboard, connectivity, vibrator
+screen blanks (its frame callbacks held back) and when it's locked (GNOME
+suspends its window within seconds). With the screen awake it draws its
+main menu (seen in `MEAD_FRAME_DUMP`'s frames) and nothing counts it
+hidden. Not yet seen: resuming when the screen is unlocked or wakes. Missing for it: the clipboard, connectivity, vibrator
 and sensor services, `AudioSystem`'s natives, and Play Core's asset pack
 service (it reports the packs it can't sync; the pack is there anyway).
 
