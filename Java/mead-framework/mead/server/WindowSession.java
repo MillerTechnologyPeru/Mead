@@ -58,6 +58,8 @@ final class WindowSession extends WindowSessionBase {
         boolean focused;
         /** Whether the compositor has stopped showing it (minimized, the screen off). */
         boolean compositorHidden;
+        /** Whether it keeps the screen on, as the bridge was told. */
+        boolean keepScreenOn;
 
         WindowState(IWindow window) {
             this.window = window;
@@ -282,6 +284,14 @@ final class WindowSession extends WindowSessionBase {
             }
         }
         state.visible = visible && state.surfaceControl != null;
+        // FLAG_KEEP_SCREEN_ON holds while the window is visible, as Android's
+        // power manager takes it.
+        boolean keepScreenOn = state.visible
+                && (state.attrs.flags & WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0;
+        if (keepScreenOn != state.keepScreenOn && state.surface != null) {
+            state.keepScreenOn = keepScreenOn;
+            WindowManagerService.nativeSetKeepScreenOn(state.surface, keepScreenOn);
+        }
         if (state.visible) {
             outSurfaceControl.copyFrom(state.surfaceControl);
         } else {
