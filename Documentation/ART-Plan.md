@@ -710,8 +710,12 @@ Duet).
 Subnautica: Below Zero on ART (2026-11-12, base APK and its three splits,
 arm64 libraries in the app's library directory): Unity 6000.0 runs its
 scripts, loads its main menu scene and renders with Vulkan to its
-`SurfaceView`, which the compositor shows; not yet seen on screen (Mead's
-frame dump covers EGL only). Its pairip license client binds Play's
+`SurfaceView`, which the compositor shows. Its main menu is seen
+(2026-11-12) in `MEAD_VULKAN_FRAME_DUMP`'s frames: MeadVulkan, when that's
+set, makes swapchains' images copyable and, every 60 presents, copies the
+image being presented to a host buffer after the present's semaphores,
+waits, and writes it as a PPM; its water moves from frame to frame. Its
+swapchain is 2000×1200, which the layer scales to the view. Its pairip license client binds Play's
 licensing service and asks the second protocol (`checkLicenseV2`). Mead
 runs that service in-process (`mead.server.LicensingService`, written
 against the AIDL by hand): each request is asked of Google for the account
