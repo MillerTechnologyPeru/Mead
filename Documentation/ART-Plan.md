@@ -704,7 +704,8 @@ or patches, and setters that change nothing; Android's ask AudioFlinger
 over binder. It doesn't keep the screen on at its menu, as on Android.
 Missing for it: the clipboard, connectivity, vibrator and sensor
 services, and Play Core's asset pack service (it reports the packs it
-can't sync; the pack is there anyway). Not yet heard: its sound.
+can't sync; the pack is there anyway). Its sound plays (heard on the
+Duet).
 
 ### Phase 7: remove MeadJNI
 
