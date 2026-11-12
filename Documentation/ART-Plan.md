@@ -753,9 +753,25 @@ startup reading its path. Java now sees Android's first app uid, 10000,
 on every device (`Os.getuid` and `Binder.getCallingUid`,
 `ARTIdentity.swift`); the kernel still checks files against the real
 user. The Retroid needs liblz4, libxxhash and libvixl beside ART, from
-Debian. Not yet: the Retroid's panel is portrait (1080×1920) and sway
-rotates it, but Mead reports the panel's own mode, ignoring the output's
-transform, so the game lays itself out in portrait.
+Debian. The Retroid's panel is portrait (1080×1920) and sway turns it;
+outputs are now reported as shown (1920×1080), from wl_output's transform.
+
+Frame rate on the Retroid (2026-11-12, main menu, `MEAD_VULKAN_FPS=1`,
+which writes presents per second): MeadJNI's build holds 60.0 (slowest
+frame about 20 ms). On ART it first ran at 5: sway (wlroots) answers frame
+callbacks only for surfaces it can see, and the game's opaque SurfaceView
+covered the window's root, where Mead asked for them, so every vsync came
+from the 100 ms fallback and Swappy paced each frame to two. Frame
+callbacks are now asked on a clear 1×1 vsync surface over the window's
+content. Then 30: Below Zero's powersave regulator holds 30 frames a
+second while the battery's status is unknown, and Mead answered no sticky
+broadcasts; the battery broadcast now comes from the host's
+`/sys/class/power_supply`. Now about 58 (55–60 a second; about one frame
+a second takes two vsyncs, 35–38 ms), in a half-screen tile beside
+EmulationStation, as ART's windows don't take `MEAD_FULLSCREEN` yet. After
+about a minute with no input the regulator drops the menu to 30, as the
+game does on a phone. GNOME answers every mapped surface, so the Duet
+never showed the 5.
 
 ### Phase 7: remove MeadJNI
 
