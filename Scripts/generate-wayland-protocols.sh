@@ -14,7 +14,8 @@ mkdir -p "$target/include"
 for xml in \
     stable/xdg-shell/xdg-shell.xml \
     stable/viewporter/viewporter.xml \
-    unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
+    unstable/xdg-decoration/xdg-decoration-unstable-v1.xml \
+    unstable/idle-inhibit/idle-inhibit-unstable-v1.xml
 do
     name=$(basename "$xml" .xml)
     wayland-scanner client-header "$protocols/$xml" "$target/include/$name-client-protocol.h"
