@@ -553,7 +553,11 @@ Order:
    `ANativeWindow_setBuffersGeometry`'s scaling (EGL draws at the window's
    size whatever the game asks), and Vulkan on these windows, unchecked.
 4. `xdg_popup`, idle inhibition, fullscreen, the input method, the
-   clipboard.
+   clipboard. Idle inhibition done 2026-11-11: a visible window with
+   `FLAG_KEEP_SCREEN_ON` (`View.setKeepScreenOn`, a game's or a video
+   player's) holds a `zwp_idle_inhibitor_v1` on its root, which the
+   compositor honors while it shows the window; `SurfaceViewCheck` keeps
+   the screen on (GNOME takes the inhibitor).
 5. dmabuf gralloc through GBM.
 
 ### Phase 5: in-process system services (Swift)
@@ -685,9 +689,20 @@ display's rate). With both, Defense Zone 2 HD pauses cleanly when the
 screen blanks (its frame callbacks held back) and when it's locked (GNOME
 suspends its window within seconds). With the screen awake it draws its
 main menu (seen in `MEAD_FRAME_DUMP`'s frames) and nothing counts it
-hidden. Not yet seen: resuming when the screen is unlocked or wakes. Missing for it: the clipboard, connectivity, vibrator
-and sensor services, `AudioSystem`'s natives, and Play Core's asset pack
-service (it reports the packs it can't sync; the pack is there anyway).
+hidden. Not yet seen: resuming when the screen is unlocked or wakes.
+
+Playable 2026-11-11: taps (`MEAD_DEBUG_TAPS`, in the window's surface
+pixels, insets included) reach Unity through its window; Begin game opens
+its mission select and Play loads Mission 1, which runs (seen in frame
+dumps: its map, money, health, waves and tower bar). Its audio is an
+AAudio stream with a callback, at 24 kHz, the game's own rate, which
+starts. Java's `AudioSystem` has Mead's natives (the fork's
+`mead_audio_system.cpp`): one output, the speaker, at 48 kHz, no ports
+or patches, and setters that change nothing; Android's ask AudioFlinger
+over binder. It doesn't keep the screen on at its menu, as on Android.
+Missing for it: the clipboard, connectivity, vibrator and sensor
+services, and Play Core's asset pack service (it reports the packs it
+can't sync; the pack is there anyway). Not yet heard: its sound.
 
 ### Phase 7: remove MeadJNI
 
