@@ -37,13 +37,25 @@ final class Wayland {
     /// An output: a monitor or a device's screen.
     final class Output {
         let proxy: OpaquePointer
-        var width: Int32 = 0
-        var height: Int32 = 0
+        /// The mode and physical size as the panel has them, before the
+        /// compositor turns it: a handheld's portrait panel shown landscape
+        /// (the Retroid's 1080×1920 DSI panel, which sway rotates).
+        var panelWidth: Int32 = 0
+        var panelHeight: Int32 = 0
+        var panelMillimetersWide: Int32 = 0
+        var panelMillimetersHigh: Int32 = 0
+        /// wl_output's transform: odd values turn the panel a quarter turn.
+        var transform: Int32 = 0
         var refresh: Int32 = 0  // mHz
-        var millimetersWide: Int32 = 0
-        var millimetersHigh: Int32 = 0
         var scale: Int32 = 1
         init(_ proxy: OpaquePointer) { self.proxy = proxy }
+
+        private var turned: Bool { transform & 1 != 0 }
+        /// The output as it's shown: what apps lay themselves out on.
+        var width: Int32 { turned ? panelHeight : panelWidth }
+        var height: Int32 { turned ? panelWidth : panelHeight }
+        var millimetersWide: Int32 { turned ? panelMillimetersHigh : panelMillimetersWide }
+        var millimetersHigh: Int32 { turned ? panelMillimetersWide : panelMillimetersHigh }
     }
 
     private(set) var outputs: [Output] = []
@@ -229,17 +241,18 @@ final class Wayland {
     nonisolated(unsafe) private static let outputListener: UnsafeMutablePointer<wl_output_listener> = {
         let listener = UnsafeMutablePointer<wl_output_listener>.allocate(capacity: 1)
         listener.initialize(to: wl_output_listener(
-            geometry: { data, _, _, _, width, height, _, _, _, _ in
+            geometry: { data, _, _, _, width, height, _, _, _, transform in
                 guard let data else { return }
                 let output = Unmanaged<Output>.fromOpaque(data).takeUnretainedValue()
-                output.millimetersWide = width
-                output.millimetersHigh = height
+                output.panelMillimetersWide = width
+                output.panelMillimetersHigh = height
+                output.transform = transform
             },
             mode: { data, _, flags, width, height, refresh in
                 guard let data, flags & UInt32(WL_OUTPUT_MODE_CURRENT.rawValue) != 0 else { return }
                 let output = Unmanaged<Output>.fromOpaque(data).takeUnretainedValue()
-                output.width = width
-                output.height = height
+                output.panelWidth = width
+                output.panelHeight = height
                 output.refresh = refresh
             },
             done: { _, _ in },
