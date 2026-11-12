@@ -54,7 +54,9 @@ public final class ART {
     public var nativesDirectory: String { "\(home)/lib/java/dex/art/natives" }
 
     /// The options ART starts with: the class path, where an app's native
-    /// libraries are, and any others given.
+    /// libraries are, any others given, and MEAD_ART_OPTIONS's, separated
+    /// by spaces (for debugging: -Xcheck:jni -Xjnitrace:GameActivity logs
+    /// a class's native calls with their arguments).
     public static func options(classPath: [String], libraryPath: [String], extra: [String] = []) -> [String] {
         var options: [String] = []
         if !classPath.isEmpty {
@@ -63,7 +65,8 @@ public final class ART {
         if !libraryPath.isEmpty {
             options.append("-Djava.library.path=\(libraryPath.joined(separator: ":"))")
         }
-        return options + extra
+        let debugging = getenv("MEAD_ART_OPTIONS").map { String(cString: $0).split(separator: " ").map(String.init) } ?? []
+        return options + extra + debugging
     }
 
     /// Starts ART. `providerDirectory` is where Mead's providers are, with
