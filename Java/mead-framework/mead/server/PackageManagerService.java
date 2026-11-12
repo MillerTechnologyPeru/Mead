@@ -78,6 +78,12 @@ final class PackageManagerService extends PackageManagerBase {
     }
 
     @Override
+    public android.content.pm.ServiceInfo getServiceInfo(ComponentName component, int flags, int userId) {
+        MeadApp app = app(component.getPackageName());
+        return app != null ? app.serviceInfo(component.getClassName(), app.applicationInfo()) : null;
+    }
+
+    @Override
     public ResolveInfo resolveIntent(Intent intent, String resolvedType, int flags, int userId) {
         MeadApp app = MeadApp.sCurrent;
         ActivityInfo activity = app != null ? app.resolveActivity(intent, resolvedType) : null;
