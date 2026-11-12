@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef int32_t VkResult;
 typedef void *VkInstance;
@@ -507,18 +508,55 @@ typedef struct {
 typedef PFN_vkVoidFunction (*PFN_vkGetDeviceProcAddr)(VkDevice, const char *);
 
 static const char *dump_path;
+// MEAD_VULKAN_FPS: presents per second, written to standard error each
+// second, to compare frame rates across hosts and builds.
+static bool counting_frames;
 static PFN_vkGetDeviceProcAddr host_get_device_proc_addr;
 
 static void open_dump(void) {
     dump_path = getenv("MEAD_VULKAN_FRAME_DUMP");
     if (dump_path && !*dump_path)
         dump_path = NULL;
+    const char *fps = getenv("MEAD_VULKAN_FPS");
+    counting_frames = fps && *fps && strcmp(fps, "0") != 0;
 }
 
+// Whether presents are watched, to dump frames or count them; without
+// either, nothing is shimmed past the window system.
 static bool dumping(void) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, open_dump);
-    return dump_path != NULL;
+    return dump_path != NULL || counting_frames;
+}
+
+// Counts a present and, once a second has passed since the last report,
+// writes the rate and the slowest frame's time.
+static void count_frame(void) {
+    static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+    static struct timespec started, previous;
+    static unsigned frames;
+    static double slowest;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    pthread_mutex_lock(&lock);
+    if (started.tv_sec == 0 && started.tv_nsec == 0) {
+        started = previous = now;
+        pthread_mutex_unlock(&lock);
+        return;
+    }
+    double frame = (double)(now.tv_sec - previous.tv_sec) + (double)(now.tv_nsec - previous.tv_nsec) / 1e9;
+    double elapsed = (double)(now.tv_sec - started.tv_sec) + (double)(now.tv_nsec - started.tv_nsec) / 1e9;
+    previous = now;
+    frames++;
+    if (frame > slowest)
+        slowest = frame;
+    if (elapsed >= 1) {
+        fprintf(stderr, "mead: vulkan: %.1f fps, slowest frame %.1f ms\n", frames / elapsed, slowest * 1000);
+        started = now;
+        frames = 0;
+        slowest = 0;
+    }
+    pthread_mutex_unlock(&lock);
 }
 
 // What a dump needs to know of the objects it reads: each device's physical
@@ -790,7 +828,8 @@ static VkResult shim_vkCreateSwapchainKHR(VkDevice device, const VkSwapchainCrea
     // won't, the swapchain is made as asked and not dumped.
     unsigned char copied[SWAPCHAIN_CREATE_INFO_SIZE];
     memcpy(copied, info, sizeof(copied));
-    ((VkSwapchainCreateInfoKHR *)copied)->imageUsage |= 0x1; // TRANSFER_SRC
+    if (dump_path)
+        ((VkSwapchainCreateInfoKHR *)copied)->imageUsage |= 0x1; // TRANSFER_SRC
     bool readable = true;
     VkResult result = vkCreateSwapchainKHR(device, copied, allocator, swapchain);
     if (result != VK_SUCCESS) {
@@ -834,9 +873,11 @@ static VkResult shim_vkQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR *in
     // A queue the dump didn't see made goes through the loader.
     Present vkQueuePresentKHR = device ? (Present)host_get_device_proc_addr(device, "vkQueuePresentKHR")
                                        : (Present)dlsym(vulkan_library, "vkQueuePresentKHR");
+    if (counting_frames && info->swapchainCount > 0)
+        count_frame();
     if (!device)
         return vkQueuePresentKHR(queue, info);
-    if (info->swapchainCount > 0 && __atomic_fetch_add(&presents, 1, __ATOMIC_RELAXED) % 60 == 0 && dump_image(queue, info)) {
+    if (dump_path && info->swapchainCount > 0 && __atomic_fetch_add(&presents, 1, __ATOMIC_RELAXED) % 60 == 0 && dump_image(queue, info)) {
         VkPresentInfoKHR waited = *info;
         waited.waitSemaphoreCount = 0;
         waited.pWaitSemaphores = NULL;
