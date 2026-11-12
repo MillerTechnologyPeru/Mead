@@ -329,10 +329,32 @@ final class Wayland {
         // logical size: EGL's as well as the CPU frames attach gives.
         wp_viewport_set_destination(window.layerViewport, logical(window.width), logical(window.height))
         window.eglWindow = wl_egl_window_create(layer, max(window.width, 1), max(window.height, 1))
+        makeTick(window, root: root, above: layer)
         windows[root] = window
         windows[layer] = window
         map(window)
         return true
+    }
+
+    /// The window's vsync surface: clear, 1×1, taking no input, kept over
+    /// the content (layers placed above the content go under it). Frame
+    /// callbacks are asked on it, not the root: wlroots (sway) answers only
+    /// surfaces some of which shows, and a game's opaque SurfaceView covers
+    /// the root, which left Below Zero on the Retroid at 5 frames a second
+    /// on the held-back fallback.
+    private func makeTick(_ window: ARTDisplay.Window, root: OpaquePointer, above content: OpaquePointer) {
+        guard let tick = wl_compositor_create_surface(compositor) else { return }
+        window.tick = tick
+        window.tickSubsurface = wl_subcompositor_get_subsurface(subcompositor, tick, root)
+        wl_subsurface_set_position(window.tickSubsurface, 0, 0)
+        wl_subsurface_place_above(window.tickSubsurface, content)
+        wl_subsurface_set_desync(window.tickSubsurface)
+        let region = wl_compositor_create_region(compositor)
+        wl_surface_set_input_region(tick, region)
+        wl_region_destroy(region)
+        wl_surface_attach(tick, backgroundBuffer(), 0, 0)
+        wl_surface_damage_buffer(tick, 0, 0, 1, 1)
+        wl_surface_commit(tick)
     }
 
     /// A layer's surface: a subsurface of its window's root, hidden until a
@@ -749,6 +771,10 @@ final class Wayland {
             windows[layer] = nil
             wl_surface_destroy(layer)
         }
+        if let tickSubsurface = window.tickSubsurface { wl_subsurface_destroy(tickSubsurface) }
+        if let tick = window.tick { wl_surface_destroy(tick) }
+        window.tick = nil
+        window.tickSubsurface = nil
         if let decoration = window.decoration { zxdg_toplevel_decoration_v1_destroy(decoration) }
         if let popup = window.popup { xdg_popup_destroy(popup) }
         if let toplevel = window.toplevel { xdg_toplevel_destroy(toplevel) }
@@ -887,14 +913,15 @@ final class Wayland {
     }
 
     private func requestFrame() {
-        guard frameCallback == nil, let window = vsyncWindow, window.mapped, let root = window.root else { return }
-        let callback = wl_surface_frame(root)
+        guard frameCallback == nil, let window = vsyncWindow, window.mapped,
+              let surface = window.tick ?? window.root else { return }
+        let callback = wl_surface_frame(surface)
         frameCallback = callback
         frameAskedAt = ARTDisplay.now()
         _ = wl_callback_add_listener(callback, Self.frameListener, context)
         // Damaged, so the compositor repaints it and answers.
-        wl_surface_damage_buffer(root, 0, 0, 1, 1)
-        wl_surface_commit(root)
+        wl_surface_damage_buffer(surface, 0, 0, 1, 1)
+        wl_surface_commit(surface)
     }
 
     private func dropFrameCallback() {
