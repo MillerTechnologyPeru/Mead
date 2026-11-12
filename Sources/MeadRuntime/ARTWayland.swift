@@ -28,6 +28,8 @@ final class Wayland {
     private(set) var wmBaseVersion: UInt32 = 0
     private(set) var viewporter: OpaquePointer?
     private(set) var decorations: OpaquePointer?
+    /// zwp_idle_inhibit_manager_v1, for windows that keep the screen on.
+    private var idleInhibitManager: OpaquePointer?
     private(set) var seat: OpaquePointer?
     private(set) var shmFormats = Set<UInt32>()
     private var registry: OpaquePointer?
@@ -193,6 +195,8 @@ final class Wayland {
             _ = xdg_wm_base_add_listener(wmBase, Self.wmBaseListener, context)
         case "wp_viewporter": viewporter = bind(mead_wp_viewporter_interface(), 1)
         case "zxdg_decoration_manager_v1": decorations = bind(mead_zxdg_decoration_manager_v1_interface(), 1)
+        case "zwp_idle_inhibit_manager_v1":
+            idleInhibitManager = bind(mead_zwp_idle_inhibit_manager_v1_interface(), 1)
         case "wl_seat":
             guard seat == nil else { return }
             seat = bind(mead_wl_seat_interface(), 5)
@@ -681,7 +685,28 @@ final class Wayland {
         return false
     }
 
+    /// Keeps the screen on while the window shows, as Android's
+    /// FLAG_KEEP_SCREEN_ON does (a game's or a video's), or no more: an idle
+    /// inhibitor on its root, which holds only while the compositor shows it.
+    func setKeepScreenOn(_ window: ARTDisplay.Window, _ on: Bool) {
+        if on, window.idleInhibitor == nil, let manager = idleInhibitManager, let root = window.root {
+            window.idleInhibitor = zwp_idle_inhibit_manager_v1_create_inhibitor(manager, root)
+            ARTDisplay.report("window \(window.id) keeps the screen on")
+        } else if !on, let inhibitor = window.idleInhibitor {
+            zwp_idle_inhibitor_v1_destroy(inhibitor)
+            window.idleInhibitor = nil
+            ARTDisplay.report("window \(window.id) lets the screen sleep")
+        } else if on, idleInhibitManager == nil {
+            ARTDisplay.report("window \(window.id) wants the screen on; the compositor can't keep it on")
+        }
+        _ = wl_display_flush(display)
+    }
+
     func destroySurfaces(_ window: ARTDisplay.Window) {
+        if let inhibitor = window.idleInhibitor {
+            zwp_idle_inhibitor_v1_destroy(inhibitor)
+            window.idleInhibitor = nil
+        }
         // Popups over it, and its own, go first.
         for popup in popupStack.reversed() where isDescendant(popup, of: window) {
             takeDownPopup(popup)
