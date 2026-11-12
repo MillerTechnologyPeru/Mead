@@ -132,6 +132,10 @@ public final class MeadApp {
         }
         if (launcher == null) throw new IllegalArgumentException(sourcePath + " has no launcher activity");
         activityName = launcher;
+        List<String> apks = new ArrayList<>();
+        apks.add(sourcePath);
+        Collections.addAll(apks, mSplitPaths);
+        NativeLibraries.install(apks, new File(dataDir(), "lib"));
     }
 
     /**
