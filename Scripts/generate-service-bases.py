@@ -30,6 +30,7 @@ INTERFACES = [
     ("com.android.internal.appwidget.IAppWidgetService", "AppWidgetServiceBase"),
     ("android.os.storage.IStorageManager", "StorageManagerBase"),
     ("android.content.IContentService", "ContentServiceBase"),
+    ("android.net.wifi.IWifiManager", "WifiManagerBase"),
 ]
 
 METHOD = re.compile(r"^\s*public abstract (.+?) (\w+)\((.*)\)( throws [\w.$, ]+)?;$")
