@@ -689,7 +689,9 @@ display's rate). With both, Defense Zone 2 HD pauses cleanly when the
 screen blanks (its frame callbacks held back) and when it's locked (GNOME
 suspends its window within seconds). With the screen awake it draws its
 main menu (seen in `MEAD_FRAME_DUMP`'s frames) and nothing counts it
-hidden. Not yet seen: resuming when the screen is unlocked or wakes.
+hidden. Resuming seen 2026-11-11: unlocked, GNOME shows the window
+again within the second, the activity resumes and Unity draws on; played
+by hand afterwards (towers built, waves on).
 
 Playable 2026-11-11: taps (`MEAD_DEBUG_TAPS`, in the window's surface
 pixels, insets included) reach Unity through its window; Begin game opens
