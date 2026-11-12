@@ -184,6 +184,8 @@ final class ARTDisplay {
         /// window manager was last told.
         var suspended = false
         var heldBack = false
+        /// Its idle inhibitor, while it keeps the screen on.
+        var idleInhibitor: OpaquePointer?
         var reportedHidden = false
         var mouseDownTime: Int64 = 0
         var fingers: [(source: UInt64, id: Int32, x: Float, y: Float, pressure: Float)] = []
