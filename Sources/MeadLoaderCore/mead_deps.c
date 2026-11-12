@@ -145,9 +145,30 @@ static void *own_symbol(void *handle, const char *name) {
     return provider == definer ? symbol : NULL;
 }
 
+// The runtime's own NDK function for a name while ART runs: AOSP's
+// libandroid sources on the framework's real objects (input queues and
+// events, assets, configurations, native activities), which ART's
+// libandroid_runtime exports as mead_ndk_<name>. ART loads it before any
+// app library, and it stays loaded.
+static void *runtime_ndk_symbol(const char *name) {
+    static void *runtime;
+    if (!runtime)
+        runtime = dlopen("libandroid_runtime.so", RTLD_NOW | RTLD_NOLOAD);
+    if (!runtime || name[0] != 'A')
+        return NULL;
+    char prefixed[256];
+    if (snprintf(prefixed, sizeof(prefixed), "mead_ndk_%s", name) >= (int)sizeof(prefixed))
+        return NULL;
+    return dlsym(runtime, prefixed);
+}
+
 void *mead_deps_provider_symbol(const char *name) {
     pthread_mutex_lock(&lock);
-    void *symbol = NULL;
+    void *symbol = runtime_ndk_symbol(name);
+    if (symbol) {
+        pthread_mutex_unlock(&lock);
+        return symbol;
+    }
     void *asked = NULL; // sonames sharing a provider sit side by side
     for (size_t index = 0; index < PROVIDER_COUNT && !symbol; index++) {
         void *handle = open_provider(index);
