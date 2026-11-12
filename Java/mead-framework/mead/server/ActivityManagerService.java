@@ -6,6 +6,7 @@ import android.app.IApplicationThread;
 import android.app.PendingIntent;
 import android.content.IIntentReceiver;
 import android.content.IIntentSender;
+import android.app.IServiceConnection;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.os.IBinder;
@@ -149,6 +150,29 @@ final class ActivityManagerService extends ActivityManagerBase {
     }
 
     private final List<Receiver> mReceivers = new ArrayList<>();
+
+    private LicensingService mLicensing;
+
+    /**
+     * Services of other apps: Play's licensing service, which Mead runs in
+     * this process. Any other isn't here, and doesn't bind.
+     */
+    @Override
+    public int bindIsolatedService(IApplicationThread caller, IBinder token, Intent service, String resolvedType,
+            IServiceConnection connection, int flags, String instanceName, String callingPackage, int userId)
+            throws RemoteException {
+        if (connection == null || !LicensingService.handles(service)) return 0;
+        synchronized (this) {
+            if (mLicensing == null) mLicensing = new LicensingService();
+        }
+        connection.connected(LicensingService.COMPONENT, mLicensing, false);
+        return 1;
+    }
+
+    @Override
+    public boolean unbindService(IServiceConnection connection) {
+        return true;
+    }
 
     @Override
     public Intent registerReceiver(IApplicationThread caller, String callerPackage, IIntentReceiver receiver,
