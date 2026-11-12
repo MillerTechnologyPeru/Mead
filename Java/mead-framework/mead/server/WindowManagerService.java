@@ -86,6 +86,9 @@ final class WindowManagerService extends WindowManagerBase {
      */
     static native void nativeSetDimBehind(Surface surface, float amount);
 
+    /** Keeps the screen on while the window shows (FLAG_KEEP_SCREEN_ON), or no more. */
+    static native void nativeSetKeepScreenOn(Surface surface, boolean on);
+
     /** The window Android's focus is on, whose keys it gets; null for none. */
     static native void nativeSetFocus(Surface surface);
 
