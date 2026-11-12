@@ -15,6 +15,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "xdg-decoration-unstable-v1-client-protocol.h"
+#include "idle-inhibit-unstable-v1-client-protocol.h"
 
 // The interfaces registry binds take, by address: Swift sees libwayland's
 // interface tables as constants and can't take theirs.
@@ -28,6 +29,7 @@ MEAD_WAYLAND_INTERFACE(wl_output)
 MEAD_WAYLAND_INTERFACE(xdg_wm_base)
 MEAD_WAYLAND_INTERFACE(wp_viewporter)
 MEAD_WAYLAND_INTERFACE(zxdg_decoration_manager_v1)
+MEAD_WAYLAND_INTERFACE(zwp_idle_inhibit_manager_v1)
 #undef MEAD_WAYLAND_INTERFACE
 
 // A memfd for shm buffers: glibc declares memfd_create only with
