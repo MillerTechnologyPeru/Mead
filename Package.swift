@@ -146,7 +146,7 @@ let package = Package(
         .target(name: "CMeadDLBio"),
         .target(
             name: "MeadRuntime",
-            dependencies: ["CMeadWayland", "MeadWindow", .product(name: "SwiftJavaJNICore", package: "swift-java-jni-core")]
+            dependencies: ["CMeadWayland", "MeadWindow", "MeadGooglePlay", .product(name: "SwiftJavaJNICore", package: "swift-java-jni-core")]
         ),
         .target(
             name: "MeadART",
