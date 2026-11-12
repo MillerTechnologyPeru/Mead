@@ -43,6 +43,8 @@ public final class MeadApp {
     }
 
     final String packageName;
+    /** The manifest's version code; 0 for a dex. */
+    final long versionCode;
     final String sourcePath;
     final int width;
     final int height;
@@ -51,6 +53,8 @@ public final class MeadApp {
     /** What the manifest says of the application, without where it's installed. */
     private final ApplicationInfo mApplication;
     private final Map<String, Activity> mActivities = new LinkedHashMap<>();
+    /** Its services, by class name, with their meta-data. */
+    private final Map<String, android.content.pm.ServiceInfo> mServices = new LinkedHashMap<>();
     /** The permissions the manifest asks for. */
     final List<String> requestedPermissions;
     /** Its split APKs' names and paths (an asset pack is one); none for a dex. */
@@ -62,6 +66,7 @@ public final class MeadApp {
     /** A dex's app: one activity, named. */
     MeadApp(String packageName, String activityName, String sourcePath, int width, int height) {
         this.packageName = packageName;
+        versionCode = 0;
         this.activityName = activityName;
         this.sourcePath = sourcePath;
         this.width = width;
@@ -92,6 +97,7 @@ public final class MeadApp {
     /** An APK's app, from its manifest. */
     MeadApp(PackageParser.Package parsed, String sourcePath, int width, int height) {
         this.packageName = parsed.packageName;
+        versionCode = parsed.getLongVersionCode();
         this.sourcePath = sourcePath;
         this.width = width;
         this.height = height;
@@ -104,6 +110,14 @@ public final class MeadApp {
             mSplitPaths[index] = splits.get(index).codePath;
         }
         mApplication = parsed.applicationInfo;
+        // The application's meta-data, as GET_META_DATA gives it: Play
+        // services' clients look for com.google.android.gms.version there.
+        mApplication.metaData = parsed.mAppMetaData;
+        for (PackageParser.Service service : parsed.services) {
+            android.content.pm.ServiceInfo info = new android.content.pm.ServiceInfo(service.info);
+            info.metaData = service.metaData;
+            mServices.put(info.name, info);
+        }
         String launcher = null;
         for (PackageParser.Activity activity : parsed.activities) {
             List<IntentFilter> filters = new ArrayList<IntentFilter>(activity.intents);
@@ -219,6 +233,21 @@ public final class MeadApp {
         // Its meta-data, as GET_META_DATA gives it: AppCompat finds an
         // activity's parent there (android.support.PARENT_ACTIVITY).
         info.metaData = activity.metaData;
+        if (info.processName == null) info.processName = application.processName;
+        return info;
+    }
+
+    /**
+     * A service, by its class name, with the installed application; null for
+     * none. Its meta-data, as GET_META_DATA gives it: Firebase lists its
+     * components on ComponentDiscoveryService's.
+     */
+    android.content.pm.ServiceInfo serviceInfo(String name, ApplicationInfo application) {
+        android.content.pm.ServiceInfo service = mServices.get(name);
+        if (service == null) return null;
+        android.content.pm.ServiceInfo info = new android.content.pm.ServiceInfo(service);
+        info.applicationInfo = application;
+        info.metaData = service.metaData;
         if (info.processName == null) info.processName = application.processName;
         return info;
     }
