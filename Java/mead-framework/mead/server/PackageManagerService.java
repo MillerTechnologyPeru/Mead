@@ -12,10 +12,11 @@ import android.content.pm.ParceledListSlice;
 import android.content.pm.ResolveInfo;
 import android.os.Process;
 import java.util.ArrayList;
+import java.io.File;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import mead.server.base.PackageManagerBase;
 
 /**
@@ -24,16 +25,46 @@ import mead.server.base.PackageManagerBase;
  * gamepads.
  */
 final class PackageManagerService extends PackageManagerBase {
-    /** What this device has, as PackageManager's FEATURE_* names. */
-    private static final Set<String> FEATURES = new HashSet<>(Arrays.asList(
-            PackageManager.FEATURE_TOUCHSCREEN,
-            PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH,
-            PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_DISTINCT,
-            PackageManager.FEATURE_FAKETOUCH,
-            PackageManager.FEATURE_SCREEN_LANDSCAPE,
-            PackageManager.FEATURE_SCREEN_PORTRAIT,
-            PackageManager.FEATURE_GAMEPAD,
-            PackageManager.FEATURE_AUDIO_OUTPUT));
+    /** What this device has, as PackageManager's FEATURE_* names, with their versions. */
+    private static final Map<String, Integer> FEATURES = features();
+
+    private static Map<String, Integer> features() {
+        Map<String, Integer> features = new HashMap<>();
+        for (String name : Arrays.asList(
+                PackageManager.FEATURE_TOUCHSCREEN,
+                PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH,
+                PackageManager.FEATURE_TOUCHSCREEN_MULTITOUCH_DISTINCT,
+                PackageManager.FEATURE_FAKETOUCH,
+                PackageManager.FEATURE_SCREEN_LANDSCAPE,
+                PackageManager.FEATURE_SCREEN_PORTRAIT,
+                PackageManager.FEATURE_GAMEPAD,
+                PackageManager.FEATURE_AUDIO_OUTPUT)) {
+            features.put(name, 0);
+        }
+        // Vulkan where the host has a driver, as an Android 10 device lists
+        // it: level 1, version 1.1 (what Mead's libvulkan reports to apps),
+        // no extra compute. Unreal picks its Vulkan renderer by these.
+        if (hasVulkanDriver()) {
+            features.put(PackageManager.FEATURE_VULKAN_HARDWARE_LEVEL, 1);
+            features.put(PackageManager.FEATURE_VULKAN_HARDWARE_VERSION, 0x401000);
+            features.put(PackageManager.FEATURE_VULKAN_HARDWARE_COMPUTE, 0);
+        }
+        return features;
+    }
+
+    /** Whether the host's Vulkan loader has a driver to load (an ICD manifest). */
+    private static boolean hasVulkanDriver() {
+        for (String directory : new String[] {"/usr/share/vulkan/icd.d", "/etc/vulkan/icd.d",
+                "/usr/local/share/vulkan/icd.d"}) {
+            String[] manifests = new File(directory).list();
+            if (manifests != null) {
+                for (String manifest : manifests) {
+                    if (manifest.endsWith(".json")) return true;
+                }
+            }
+        }
+        return false;
+    }
 
     private static MeadApp app(String packageName) {
         MeadApp app = MeadApp.sCurrent;
@@ -47,8 +78,10 @@ final class PackageManagerService extends PackageManagerBase {
         PackageInfo info = new PackageInfo();
         info.packageName = packageName;
         info.applicationInfo = app.applicationInfo();
-        info.versionName = "1";
-        info.setLongVersionCode(1);
+        // The manifest's version, which games name their expansion files by
+        // (Unreal's main.<versionCode>.<package>.obb); 1 for a dex.
+        info.versionName = app.versionName != null ? app.versionName : "1";
+        info.setLongVersionCode(app.versionCode > 0 ? app.versionCode : 1);
         if ((flags & PackageManager.GET_ACTIVITIES) != 0) {
             info.activities = app.activityInfos(info.applicationInfo).toArray(new ActivityInfo[0]);
         }
@@ -121,15 +154,17 @@ final class PackageManagerService extends PackageManagerBase {
 
     @Override
     public boolean hasSystemFeature(String name, int version) {
-        return FEATURES.contains(name);
+        Integer available = FEATURES.get(name);
+        return available != null && version <= available;
     }
 
     @Override
     public ParceledListSlice getSystemAvailableFeatures() {
         List<FeatureInfo> features = new ArrayList<>();
-        for (String name : FEATURES) {
+        for (Map.Entry<String, Integer> entry : FEATURES.entrySet()) {
             FeatureInfo feature = new FeatureInfo();
-            feature.name = name;
+            feature.name = entry.getKey();
+            feature.version = entry.getValue();
             features.add(feature);
         }
         return new ParceledListSlice<>(features);
