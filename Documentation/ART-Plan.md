@@ -744,6 +744,19 @@ the connectivity, clipboard, shortcut and job scheduler services, Play
 Core's asset pack service, and billing (its client finds no service and
 carries on).
 
+Below Zero reaches its main menu on the Retroid (2026-11-12, ROCKNIX,
+sway, Vulkan 1.1 on Turnip): Google issues its license token and the menu
+renders. ROCKNIX runs Mead as root, and Android's framework gives uid 0 no
+storage volumes (`StorageManager.getVolumeList` returns none when the
+package's uid is 0), so `getExternalFilesDir` was null and Unity crashed at
+startup reading its path. Java now sees Android's first app uid, 10000,
+on every device (`Os.getuid` and `Binder.getCallingUid`,
+`ARTIdentity.swift`); the kernel still checks files against the real
+user. The Retroid needs liblz4, libxxhash and libvixl beside ART, from
+Debian. Not yet: the Retroid's panel is portrait (1080×1920) and sway
+rotates it, but Mead reports the panel's own mode, ignoring the output's
+transform, so the game lays itself out in portrait.
+
 ### Phase 7: remove MeadJNI
 
 - Delete MeadJNI, CMeadJNI, MeadMacros, MeadJava, MeadMinecraft, MeadUnity
