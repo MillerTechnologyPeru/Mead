@@ -182,7 +182,8 @@ final class ActivityManagerService extends ActivityManagerBase {
                 mReceivers.add(new Receiver(receiver, filter));
             }
         }
-        // No sticky broadcasts.
+        // The battery's is the one sticky broadcast: the host's, as it is now.
+        if (filter != null && filter.hasAction(Intent.ACTION_BATTERY_CHANGED)) return Battery.changed();
         return null;
     }
 
