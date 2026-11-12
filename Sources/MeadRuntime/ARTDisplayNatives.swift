@@ -114,6 +114,7 @@ extension ARTDisplay {
         typealias NextWindowEvent = @convention(c) (Env, jclass?) -> jintArray?
         typealias SetFocus = @convention(c) (Env, jclass?, jobject?) -> Void
         typealias SetDimBehind = @convention(c) (Env, jclass?, jobject?, jfloat) -> Void
+        typealias SetKeepScreenOn = @convention(c) (Env, jclass?, jobject?, jboolean) -> Void
 
         // A window, as a SurfaceControl's native object; 0 for none.
         let create: Create = { env, _, title, kind, parent, x, y, width, height in
@@ -185,9 +186,14 @@ extension ARTDisplay {
                 if let parent = window.parent { display.wayland?.updateDim(parent) }
             }
         }
+        let setKeepScreenOn: SetKeepScreenOn = { env, _, surface, on in
+            guard let display = ARTDisplay.shared, let window = display.window(env: env, surface: surface) else { return }
+            display.enqueue { display.wayland?.setKeepScreenOn(window, on != 0) }
+        }
         func pointer<T>(_ function: T) -> UnsafeMutableRawPointer { unsafeBitCast(function, to: UnsafeMutableRawPointer.self) }
         return [
             ("nativeSetDimBehind", "(Landroid/view/Surface;F)V", pointer(setDimBehind)),
+            ("nativeSetKeepScreenOn", "(Landroid/view/Surface;Z)V", pointer(setKeepScreenOn)),
             ("nativeSetFrameInSurface", "(Landroid/view/Surface;IIII)V", pointer(setFrameInSurface)),
             ("nativeWantsCaptions", "()Z", pointer(wantsCaptions)),
             ("nativeStartMove", "(Landroid/view/Surface;)V", pointer(startMove)),
