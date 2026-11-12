@@ -707,6 +707,27 @@ services, and Play Core's asset pack service (it reports the packs it
 can't sync; the pack is there anyway). Its sound plays (heard on the
 Duet).
 
+Subnautica: Below Zero on ART (2026-11-12, base APK and its three splits,
+arm64 libraries in the app's library directory): Unity 6000.0 runs its
+scripts, loads its main menu scene and renders with Vulkan to its
+`SurfaceView`, which the compositor shows; not yet seen on screen (Mead's
+frame dump covers EGL only). Its pairip license client binds Play's
+licensing service and asks the second protocol (`checkLicenseV2`). Mead
+runs that service in-process (`mead.server.LicensingService`, written
+against the AIDL by hand): each request is asked of Google for the account
+mead-google-login signed in (MeadGooglePlay's `LicenseRelay`:
+`fdfe/apps/checkLicense` for the first protocol, `checkLicenseServerFallback`
+for the second, whose license is a JWT in payload field 173), and Google's
+answer goes to the app's listener as Play hands it over, the token as
+`LICENSE_DATA`. Mead verifies and alters neither; the app checks Google's
+signature itself. Only the app's own package may be asked about. Firebase
+finds its components through `getServiceInfo`'s meta-data on
+`ComponentDiscoveryService`, which the package manager now answers, and
+Play services' clients read the application's meta-data. Missing for it:
+the connectivity, clipboard, shortcut and job scheduler services, Play
+Core's asset pack service, and billing (its client finds no service and
+carries on).
+
 ### Phase 7: remove MeadJNI
 
 - Delete MeadJNI, CMeadJNI, MeadMacros, MeadJava, MeadMinecraft, MeadUnity
