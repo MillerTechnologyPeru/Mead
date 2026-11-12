@@ -109,6 +109,7 @@ extension ART {
 
         try registerNativeStubs(env: env)
         try registerLicensing(env: env)
+        try registerIdentity(env: env)
 
         guard let start = jni.GetStaticMethodID(env, services, "start", "()V") else {
             throw Failure("mead.server.MeadServices has no start()\(describeException(env))")
