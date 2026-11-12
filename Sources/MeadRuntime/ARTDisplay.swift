@@ -130,6 +130,11 @@ final class ARTDisplay {
         var layer: OpaquePointer?
         var subsurface: OpaquePointer?
         var layerViewport: OpaquePointer?
+        /// A clear 1×1 subsurface over everything in the window, whose frame
+        /// callbacks are the vsync: a compositor may answer only surfaces it
+        /// can see, and a game's opaque layer hides the root.
+        var tick: OpaquePointer?
+        var tickSubsurface: OpaquePointer?
         var eglWindow: OpaquePointer?
         /// How much the window dims its parent while it's mapped (Android's
         /// FLAG_DIM_BEHIND), and the dim layer over this window when one of
