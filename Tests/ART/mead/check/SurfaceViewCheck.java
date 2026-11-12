@@ -21,7 +21,8 @@ import android.widget.TextView;
 // setFixedSize, which its layer's matrix scales up to the view, then a
 // quarter, resizing its layer while it draws. The check
 // draws frames into both with lockCanvas, a moving bar on blue, under labels
-// the window draws over them, for four seconds. Each surface must be created
+// the window draws over them, for four seconds, keeping the screen on as a
+// video player does (the bridge says "keeps the screen on"). Each surface must be created
 // at its size and take frames; that they show, the right one as big as the
 // left with a blurrier bar, is the compositor's to do: look at the screen.
 //
@@ -121,6 +122,9 @@ public class SurfaceViewCheck extends Activity {
         SurfaceView plain = new SurfaceView(this);
         final Drawn left = new Drawn("view-sized", plain);
         root.addView(labeled(plain, "SurfaceView", size));
+
+        // As a video player keeps the screen on while it plays.
+        plain.setKeepScreenOn(true);
 
         final SurfaceView fixed = new SurfaceView(this);
         fixed.getHolder().setFixedSize(size / 2, size / 2);
