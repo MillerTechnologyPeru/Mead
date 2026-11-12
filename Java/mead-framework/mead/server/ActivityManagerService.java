@@ -28,6 +28,11 @@ import mead.server.base.ActivityManagerBase;
  */
 final class ActivityManagerService extends ActivityManagerBase {
     @Override
+    public void getMemoryInfo(android.app.ActivityManager.MemoryInfo info) {
+        Memory.fill(info);
+    }
+
+    @Override
     public void attachApplication(IApplicationThread thread, long startSeq) throws RemoteException {
         MeadApp app = MeadApp.sCurrent;
         if (app == null) {
