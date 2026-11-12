@@ -715,7 +715,19 @@ scripts, loads its main menu scene and renders with Vulkan to its
 set, makes swapchains' images copyable and, every 60 presents, copies the
 image being presented to a host buffer after the present's semaphores,
 waits, and writes it as a PPM; its water moves from frame to frame. Its
-swapchain is 2000×1200, which the layer scales to the view. Its pairip license client binds Play's
+swapchain is 2000×1200, which the layer scales to the view.
+
+Below Zero's new game loads and plays (2026-11-12): taps
+(`MEAD_DEBUG_TAPS`, surface pixels with the layer at 80,164 and its
+2000×1200 swapchain scaled to the 2400×1292 view) on Play, Start a new
+game, Survival and its "Tap anywhere to continue" screen (shown within
+160 seconds of starting) reach Unity through its window. Its intro
+cinematic plays and the player lands on the snow with its touch
+controls (seen in the Vulkan frame dumps); left alone, the player
+freezes to death and the game autosaves to the app's external storage.
+Unity's crash handler reports null-pointer faults now and then (five in
+eight minutes) and forwards them on; ART and il2cpp turn them into
+exceptions, and the game carries on. Its pairip license client binds Play's
 licensing service and asks the second protocol (`checkLicenseV2`). Mead
 runs that service in-process (`mead.server.LicensingService`, written
 against the AIDL by hand): each request is asked of Google for the account
