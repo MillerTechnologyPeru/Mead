@@ -60,6 +60,15 @@ final class Wayland {
 
     private(set) var outputs: [Output] = []
 
+    /// MEAD_FULLSCREEN=1: activities' windows cover the screen, as on a
+    /// phone, for a handheld whose compositor would tile them (sway beside
+    /// EmulationStation). Dialogs keep their own size.
+    static let fullscreen: Bool = {
+        guard let value = getenv("MEAD_FULLSCREEN") else { return false }
+        let text = String(cString: value)
+        return !text.isEmpty && text != "0"
+    }()
+
     // The seat's devices, and which windows they're on.
     private var keyboard: OpaquePointer?
     private var pointer: OpaquePointer?
@@ -308,6 +317,10 @@ final class Wayland {
             xdg_toplevel_set_app_id(toplevel, "mead")
             if window.kind == .dialog, let parent = window.parent?.toplevel {
                 xdg_toplevel_set_parent(toplevel, parent)
+            } else if Self.fullscreen {
+                // Before the first commit, so the first configure is the
+                // whole output; Android lays the window out at that size.
+                xdg_toplevel_set_fullscreen(toplevel, nil)
             }
             // Server-side decorations where the compositor draws them (sway);
             // GNOME's needs libdecor, which isn't here yet.
