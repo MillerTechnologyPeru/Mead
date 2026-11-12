@@ -45,6 +45,8 @@ public final class MeadApp {
     final String packageName;
     /** The manifest's version code; 0 for a dex. */
     final long versionCode;
+    /** The manifest's version name; null for a dex or a manifest without one. */
+    final String versionName;
     final String sourcePath;
     final int width;
     final int height;
@@ -67,6 +69,7 @@ public final class MeadApp {
     MeadApp(String packageName, String activityName, String sourcePath, int width, int height) {
         this.packageName = packageName;
         versionCode = 0;
+        versionName = null;
         this.activityName = activityName;
         this.sourcePath = sourcePath;
         this.width = width;
@@ -98,6 +101,7 @@ public final class MeadApp {
     MeadApp(PackageParser.Package parsed, String sourcePath, int width, int height) {
         this.packageName = parsed.packageName;
         versionCode = parsed.getLongVersionCode();
+        versionName = parsed.mVersionName;
         this.sourcePath = sourcePath;
         this.width = width;
         this.height = height;
