@@ -121,6 +121,14 @@ public final class MeadApp {
         // The application's meta-data, as GET_META_DATA gives it: Play
         // services' clients look for com.google.android.gms.version there.
         mApplication.metaData = parsed.mAppMetaData;
+        // Packs fetched through Play, from local files, by Play Core's local
+        // testing: the meta-data bundletool's --local-testing would add.
+        if (AssetPacks.install(sourcePath, packageName)) {
+            if (mApplication.metaData == null) mApplication.metaData = new android.os.Bundle();
+            if (mApplication.metaData.getString(AssetPacks.META_DATA) == null) {
+                mApplication.metaData.putString(AssetPacks.META_DATA, AssetPacks.FOLDER);
+            }
+        }
         for (PackageParser.Service service : parsed.services) {
             android.content.pm.ServiceInfo info = new android.content.pm.ServiceInfo(service.info);
             info.metaData = service.metaData;
@@ -147,11 +155,6 @@ public final class MeadApp {
     }
 
     /**
-     * An APK's splits, as a bundle's install leaves them beside it: the other
-     * APKs in its directory whose manifests name its package and a split,
-     * in their names' order, as the package manager keeps them.
-     */
-    /**
      * The APK's signers, as the package manager verifies them at install:
      * the certificates of its v3, v2 or v1 signature, after checking it.
      */
@@ -165,6 +168,11 @@ public final class MeadApp {
         }
     }
 
+    /**
+     * An APK's splits, as a bundle's install leaves them beside it: the other
+     * APKs in its directory whose manifests name its package and a split,
+     * in their names' order, as the package manager keeps them.
+     */
     private static List<PackageParser.ApkLite> splits(String sourcePath, String packageName) {
         List<PackageParser.ApkLite> splits = new ArrayList<>();
         File[] files = new File(sourcePath).getParentFile().listFiles();
