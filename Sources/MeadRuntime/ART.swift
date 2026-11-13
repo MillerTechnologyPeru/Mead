@@ -101,9 +101,15 @@ public final class ART {
         }
         // Android 10's boot class path, in the environment as Android has it,
         // so that the runtime and the dex2oat it starts agree on it.
-        // Mead's own, mead-framework.jar, after them.
+        // Mead's own, mead-framework.jar, after them; its backports,
+        // mead-backports.jar, ahead of framework.jar, so that their classes
+        // are the ones defined.
         if getenv("BOOTCLASSPATH") == nil {
             var jars = Self.bootClassPath.map { "\(home)/lib/java/dex/art/\($0).jar" }
+            if let backports = Self.meadBackports(providerDirectory: providerDirectory),
+               let framework = Self.bootClassPath.firstIndex(of: "framework") {
+                jars.insert(backports, at: framework)
+            }
             if let meadFramework = Self.meadFramework(providerDirectory: providerDirectory) {
                 jars.append(meadFramework)
             }
