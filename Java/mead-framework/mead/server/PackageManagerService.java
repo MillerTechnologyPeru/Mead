@@ -8,8 +8,11 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.FeatureInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.PackageParser;
 import android.content.pm.ParceledListSlice;
 import android.content.pm.ResolveInfo;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.os.Process;
 import java.util.ArrayList;
 import java.io.File;
@@ -84,6 +87,18 @@ final class PackageManagerService extends PackageManagerBase {
         info.setLongVersionCode(app.versionCode > 0 ? app.versionCode : 1);
         if ((flags & PackageManager.GET_ACTIVITIES) != 0) {
             info.activities = app.activityInfos(info.applicationInfo).toArray(new ActivityInfo[0]);
+        }
+        // Its signers, as Android's PackageParser.generatePackageInfo gives
+        // them: GET_SIGNATURES has the oldest signer of a rotated key.
+        PackageParser.SigningDetails signing = app.signingDetails;
+        if ((flags & PackageManager.GET_SIGNATURES) != 0 && signing.hasSignatures()) {
+            info.signatures = signing.hasPastSigningCertificates()
+                    ? new Signature[] {signing.pastSigningCertificates[0]}
+                    : signing.signatures.clone();
+        }
+        if ((flags & PackageManager.GET_SIGNING_CERTIFICATES) != 0
+                && signing != PackageParser.SigningDetails.UNKNOWN) {
+            info.signingInfo = new SigningInfo(signing);
         }
         if ((flags & PackageManager.GET_PERMISSIONS) != 0 && !app.requestedPermissions.isEmpty()) {
             info.requestedPermissions = app.requestedPermissions.toArray(new String[0]);
