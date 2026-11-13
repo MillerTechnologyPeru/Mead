@@ -191,6 +191,19 @@ static EGLBoolean shim_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSu
     return made;
 }
 
+// The app's display is the one the framework's renderer (hwui) draws Java's
+// views with, as on Android, whose EGL counts eglInitialize and only ends a
+// display at its last eglTerminate. The host's would end hwui's too: Unreal
+// terminates the display after reading the GPU's details, and hwui then
+// aborts (EGL_NOT_INITIALIZED) the next time a view redraws, as a gamepad
+// press makes it. So an app's eglTerminate leaves the display initialized,
+// releasing only the calling thread's context.
+static EGLBoolean shim_eglTerminate(EGLDisplay display) {
+    HOST("eglMakeCurrent", EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, void *))
+    host(display, NULL, NULL, NULL);
+    return 1;
+}
+
 static EGLBoolean shim_eglSwapInterval(EGLDisplay display, EGLint interval) {
     HOST("eglSwapInterval", EGLBoolean (*)(EGLDisplay, EGLint))
     EGLSurface (*current)(EGLint) = (EGLSurface (*)(EGLint))dlsym(egl_library, "eglGetCurrentSurface");
@@ -316,6 +329,8 @@ static void *shim_for(const char *name) {
         return (void *)shim_eglMakeCurrent;
     if (strcmp(name, "eglSwapInterval") == 0)
         return (void *)shim_eglSwapInterval;
+    if (strcmp(name, "eglTerminate") == 0)
+        return (void *)shim_eglTerminate;
     if (strcmp(name, "eglChooseConfig") == 0)
         return (void *)shim_eglChooseConfig;
     if (strcmp(name, "eglGetConfigAttrib") == 0)
