@@ -217,7 +217,7 @@ public final class MeadApp {
         if (sourcePath.endsWith(".apk")) {
             int width = pixels(args.length >= 2 ? Integer.parseInt(args[0]) : 1280);
             int height = pixels(args.length >= 2 ? Integer.parseInt(args[1]) : 720);
-            PackageParser.Package parsed = new PackageParser().parsePackage(new File(sourcePath), 0);
+            PackageParser.Package parsed = parse(new File(sourcePath));
             sCurrent = new MeadApp(parsed, sourcePath, width, height);
         } else {
             if (args.length < 2) {
@@ -229,6 +229,39 @@ public final class MeadApp {
             sCurrent = new MeadApp(args[0], args[1], sourcePath, width, height);
         }
         ActivityThread.main(new String[0]);
+    }
+
+    /**
+     * The app's manifest, parsed. One that asks for a newer Android than
+     * Mead's (minSdkVersion above Build.VERSION.SDK_INT) is run anyway, on
+     * Mead's: apps check the version before calling newer APIs, and they
+     * still see Mead's. The parser's own version is raised for that parse
+     * alone.
+     */
+    private static PackageParser.Package parse(File apk) throws PackageParser.PackageParserException {
+        try {
+            return new PackageParser().parsePackage(apk, 0);
+        } catch (PackageParser.PackageParserException e) {
+            java.util.regex.Matcher wanted = java.util.regex.Pattern.compile("Requires newer sdk version #(\\d+)")
+                    .matcher(String.valueOf(e.getMessage()));
+            if (!wanted.find()) throw e;
+            int version = Integer.parseInt(wanted.group(1));
+            System.err.println("mead: " + apk.getName() + " asks for API " + version + "; it runs on Mead's, API "
+                    + android.os.Build.VERSION.SDK_INT);
+            try {
+                java.lang.reflect.Field field = PackageParser.class.getDeclaredField("SDK_VERSION");
+                field.setAccessible(true);
+                int platform = field.getInt(null);
+                field.setInt(null, version);
+                try {
+                    return new PackageParser().parsePackage(apk, 0);
+                } finally {
+                    field.setInt(null, platform);
+                }
+            } catch (ReflectiveOperationException reflection) {
+                throw e;
+            }
+        }
     }
 
     /** Where the app keeps its data: ~/.mead/apps/<package>. */
