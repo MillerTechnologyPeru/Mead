@@ -66,6 +66,7 @@ public final class MeadServices {
         services.put(Context.APPWIDGET_SERVICE, new AppWidgetService());
         services.put("mount", new StorageManagerService());
         services.put(Context.WIFI_SERVICE, new WifiManagerService());
+        services.put(Context.MEDIA_SESSION_SERVICE, new MediaSessionService());
         for (Map.Entry<String, IBinder> service : services.entrySet()) {
             ServiceManager.addService(service.getKey(), service.getValue());
         }
