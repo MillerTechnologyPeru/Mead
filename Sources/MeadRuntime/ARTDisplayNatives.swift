@@ -149,6 +149,14 @@ extension ARTDisplay {
                 window.inputOffset = (Float(x), Float(y))
                 window.frame = (x, y, max(width, 1), max(height, 1))
                 display.wayland?.setWindowGeometry(window)
+                // A size the compositor gave before there was a frame: the
+                // window manager lays the window out at it now.
+                if let size = window.unsentCompositorSize {
+                    window.unsentCompositorSize = nil
+                    if size.width != width || size.height != height {
+                        display.postWindowEvent(kind: 1, window: window, width: size.width, height: size.height)
+                    }
+                }
             }
         }
         let wantsCaptions: WantsCaptions = { _, _ in
