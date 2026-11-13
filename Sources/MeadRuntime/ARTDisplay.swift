@@ -183,6 +183,10 @@ final class ARTDisplay {
         /// said (its windows are the window manager's to size); nil for a
         /// window of its own (MeadWindow's).
         var frame: (x: Int32, y: Int32, width: Int32, height: Int32)?
+        /// The size the compositor configured before the window manager had
+        /// given a frame (a fullscreen window's first configure can come
+        /// first); the window manager is told it once the frame arrives.
+        var unsentCompositorSize: (width: Int32, height: Int32)?
         var maximized = false
         /// Whether the compositor has stopped showing it: xdg_toplevel's
         /// suspended state, or its frame callbacks held back; and what the
