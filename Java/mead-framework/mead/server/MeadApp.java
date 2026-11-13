@@ -62,6 +62,8 @@ public final class MeadApp {
     /** Its split APKs' names and paths (an asset pack is one); none for a dex. */
     private final String[] mSplitNames;
     private final String[] mSplitPaths;
+    /** Who signed the APK, from its own signature; unknown for a dex. */
+    final PackageParser.SigningDetails signingDetails;
 
     static volatile MeadApp sCurrent;
 
@@ -76,6 +78,7 @@ public final class MeadApp {
         this.height = height;
         requestedPermissions = Collections.emptyList();
         mSplitNames = mSplitPaths = new String[0];
+        signingDetails = PackageParser.SigningDetails.UNKNOWN;
         mApplication = new ApplicationInfo();
         mApplication.packageName = packageName;
         mApplication.targetSdkVersion = 29;
@@ -113,6 +116,7 @@ public final class MeadApp {
             mSplitNames[index] = splits.get(index).splitName;
             mSplitPaths[index] = splits.get(index).codePath;
         }
+        signingDetails = signingDetails(parsed);
         mApplication = parsed.applicationInfo;
         // The application's meta-data, as GET_META_DATA gives it: Play
         // services' clients look for com.google.android.gms.version there.
@@ -147,6 +151,20 @@ public final class MeadApp {
      * APKs in its directory whose manifests name its package and a split,
      * in their names' order, as the package manager keeps them.
      */
+    /**
+     * The APK's signers, as the package manager verifies them at install:
+     * the certificates of its v3, v2 or v1 signature, after checking it.
+     */
+    private static PackageParser.SigningDetails signingDetails(PackageParser.Package parsed) {
+        try {
+            PackageParser.collectCertificates(parsed, false);
+            return parsed.mSigningDetails;
+        } catch (PackageParser.PackageParserException e) {
+            System.err.println("mead: " + parsed.packageName + "'s signature doesn't verify: " + e.getMessage());
+            return PackageParser.SigningDetails.UNKNOWN;
+        }
+    }
+
     private static List<PackageParser.ApkLite> splits(String sourcePath, String packageName) {
         List<PackageParser.ApkLite> splits = new ArrayList<>();
         File[] files = new File(sourcePath).getParentFile().listFiles();
