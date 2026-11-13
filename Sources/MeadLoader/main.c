@@ -15,6 +15,7 @@
 
 static void usage(FILE *out) {
     fputs("usage: mead [options] <library.so | game directory> [arguments...]\n"
+          "       mead --dex <file.dex> <class> [arguments...]\n"
           "\n"
           "options:\n"
           "  --report    load and bind without running; print imports, missing\n"
@@ -101,13 +102,15 @@ static char *library_in(const char *directory) {
 }
 
 int main(int argc, char **argv) {
-    bool report = false, selftest = false;
+    bool report = false, selftest = false, dex = false;
     int first = 1;
     for (; first < argc; first++) {
         if (strcmp(argv[first], "--report") == 0)
             report = true;
         else if (strcmp(argv[first], "--selftest") == 0)
             selftest = true;
+        else if (strcmp(argv[first], "--dex") == 0)
+            dex = true;
         else if (strcmp(argv[first], "--graphics-api") == 0) {
             if (first + 1 >= argc) {
                 usage(stderr);
@@ -134,6 +137,23 @@ int main(int argc, char **argv) {
 
     if (getenv("MEAD_CRASH_REPORT"))
         mead_install_crash_report();
+
+    // A class's main on ART, which loads whatever bionic libraries it asks
+    // for through the providers.
+    if (dex) {
+        if (first + 1 >= argc) {
+            usage(stderr);
+            return 1;
+        }
+        mead_start_providers(argv[0]);
+        int (*run)(const char *, const char *, int, char **) =
+            (int (*)(const char *, const char *, int, char **))mead_find_symbol(NULL, "mead_art_run_dex");
+        if (!run) {
+            fprintf(stderr, "mead: no provider can run a dex\n");
+            return 1;
+        }
+        return run(argv[first], argv[first + 1], argc - first - 2, argv + first + 2);
+    }
 
     char *target = argv[first];
     char *unity = NULL;

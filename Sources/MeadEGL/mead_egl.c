@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 typedef void *EGLDisplay;
 typedef void *EGLConfig;
@@ -23,6 +24,7 @@ enum {
     EGL_RED_SIZE = 0x3024,
     EGL_NONE = 0x3038,
     EGL_NATIVE_VISUAL_ID = 0x302e,
+    EGL_DRAW = 0x3059,
     EGL_RECORDABLE_ANDROID = 0x3142,
     EGL_FRAMEBUFFER_TARGET_ANDROID = 0x3147,
     WINDOW_FORMAT_RGBA_8888 = 1,
@@ -84,6 +86,57 @@ static EGLDisplay shim_eglGetDisplay(void *display) {
     return host(display);
 }
 
+// Swaps to Wayland windows don't wait on the compositor. At a swap interval
+// of 1, Mesa's eglSwapBuffers waits for the window's frame callback, which a
+// compositor holds back while it shows the window no more (GNOME, with the
+// screen blanked): a game's render thread would hang where Android's never
+// does, and miss its activity's pause. Those windows swap at interval 0, and
+// each swap is paced here to the app's interval of display refreshes, taken
+// to be 60 Hz.
+enum { PACED_SURFACES = 32 };
+static const uint64_t refresh_ns = 16666667;
+static struct paced {
+    EGLSurface surface;
+    EGLint interval;
+    uint64_t next;
+} paced[PACED_SURFACES];
+static pthread_mutex_t paced_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static struct paced *paced_find(EGLSurface surface) {
+    for (size_t index = 0; surface && index < PACED_SURFACES; index++)
+        if (paced[index].surface == surface)
+            return &paced[index];
+    return NULL;
+}
+
+static uint64_t now_ns(void) {
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC, &time);
+    return (uint64_t)time.tv_sec * 1000000000u + (uint64_t)time.tv_nsec;
+}
+
+// After a swap to a paced surface: waits for the refresh its interval says
+// the next frame belongs to.
+static void pace(EGLSurface surface) {
+    pthread_mutex_lock(&paced_lock);
+    struct paced *entry = paced_find(surface);
+    if (!entry || entry->interval <= 0) {
+        pthread_mutex_unlock(&paced_lock);
+        return;
+    }
+    uint64_t period = refresh_ns * (uint64_t)entry->interval, now = now_ns();
+    uint64_t due = entry->next;
+    // The next frame is a period after this one's refresh, or after now
+    // for a late one.
+    entry->next = (due > now ? due : now) + period;
+    pthread_mutex_unlock(&paced_lock);
+    if (due > now) {
+        struct timespec until = { (time_t)(due / 1000000000u), (long)(due % 1000000000u) };
+        while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, NULL) != 0) {
+        }
+    }
+}
+
 static EGLSurface shim_eglCreateWindowSurface(EGLDisplay display, EGLConfig config, void *window,
                                               const EGLint *attributes) {
     HOST("eglCreateWindowSurface", EGLSurface (*)(EGLDisplay, EGLConfig, void *, const EGLint *))
@@ -93,7 +146,74 @@ static EGLSurface shim_eglCreateWindowSurface(EGLDisplay display, EGLConfig conf
         return NULL;
     }
     void *handle = native.kind == MEAD_NATIVE_WINDOW_X11 ? (void *)native.window : native.egl_window;
-    return host(display, config, handle, attributes);
+    EGLSurface surface = host(display, config, handle, attributes);
+    if (surface && native.kind == MEAD_NATIVE_WINDOW_WAYLAND) {
+        pthread_mutex_lock(&paced_lock);
+        struct paced *entry = paced_find(surface);
+        for (size_t index = 0; !entry && index < PACED_SURFACES; index++)
+            if (!paced[index].surface)
+                entry = &paced[index];
+        if (entry)
+            *entry = (struct paced){ surface, 1, 0 }; // Android's default interval
+        pthread_mutex_unlock(&paced_lock);
+    }
+    return surface;
+}
+
+static EGLBoolean shim_eglDestroySurface(EGLDisplay display, EGLSurface surface) {
+    HOST("eglDestroySurface", EGLBoolean (*)(EGLDisplay, EGLSurface))
+    pthread_mutex_lock(&paced_lock);
+    struct paced *entry = paced_find(surface);
+    if (entry)
+        *entry = (struct paced){ 0 };
+    pthread_mutex_unlock(&paced_lock);
+    return host(display, surface);
+}
+
+static bool is_paced(EGLSurface surface) {
+    pthread_mutex_lock(&paced_lock);
+    bool found = paced_find(surface) != NULL;
+    pthread_mutex_unlock(&paced_lock);
+    return found;
+}
+
+// The host's interval for a paced surface is 0, set as it becomes current;
+// the app's is kept for pacing.
+static EGLBoolean shim_eglMakeCurrent(EGLDisplay display, EGLSurface draw, EGLSurface read, void *context) {
+    HOST("eglMakeCurrent", EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, void *))
+    EGLBoolean made = host(display, draw, read, context);
+    if (made && is_paced(draw)) {
+        EGLBoolean (*interval)(EGLDisplay, EGLint) =
+            (EGLBoolean (*)(EGLDisplay, EGLint))dlsym(egl_library, "eglSwapInterval");
+        if (interval)
+            interval(display, 0);
+    }
+    return made;
+}
+
+// The app's display is the one the framework's renderer (hwui) draws Java's
+// views with, as on Android, whose EGL counts eglInitialize and only ends a
+// display at its last eglTerminate. The host's would end hwui's too: Unreal
+// terminates the display after reading the GPU's details, and hwui then
+// aborts (EGL_NOT_INITIALIZED) the next time a view redraws, as a gamepad
+// press makes it. So an app's eglTerminate leaves the display initialized,
+// releasing only the calling thread's context.
+static EGLBoolean shim_eglTerminate(EGLDisplay display) {
+    HOST("eglMakeCurrent", EGLBoolean (*)(EGLDisplay, EGLSurface, EGLSurface, void *))
+    host(display, NULL, NULL, NULL);
+    return 1;
+}
+
+static EGLBoolean shim_eglSwapInterval(EGLDisplay display, EGLint interval) {
+    HOST("eglSwapInterval", EGLBoolean (*)(EGLDisplay, EGLint))
+    EGLSurface (*current)(EGLint) = (EGLSurface (*)(EGLint))dlsym(egl_library, "eglGetCurrentSurface");
+    EGLSurface draw = current ? current(EGL_DRAW) : NULL;
+    pthread_mutex_lock(&paced_lock);
+    struct paced *entry = paced_find(draw);
+    if (entry)
+        entry->interval = interval < 0 ? 0 : interval > 4 ? 4 : interval;
+    pthread_mutex_unlock(&paced_lock);
+    return host(display, entry ? 0 : interval);
 }
 
 // The host refuses attributes it has never heard of; these two only ask for
@@ -171,7 +291,25 @@ static void dump_frame(EGLDisplay display, EGLSurface surface) {
 static EGLBoolean shim_eglSwapBuffers(EGLDisplay display, EGLSurface surface) {
     HOST("eglSwapBuffers", EGLBoolean (*)(EGLDisplay, EGLSurface))
     dump_frame(display, surface);
-    return host(display, surface);
+    EGLBoolean swapped = host(display, surface);
+    pace(surface);
+    return swapped;
+}
+
+static EGLBoolean shim_eglSwapBuffersWithDamageKHR(EGLDisplay display, EGLSurface surface, const EGLint *rects,
+                                                   EGLint count) {
+    HOST("eglSwapBuffersWithDamageKHR", EGLBoolean (*)(EGLDisplay, EGLSurface, const EGLint *, EGLint))
+    EGLBoolean swapped = host(display, surface, rects, count);
+    pace(surface);
+    return swapped;
+}
+
+static EGLBoolean shim_eglSwapBuffersWithDamageEXT(EGLDisplay display, EGLSurface surface, const EGLint *rects,
+                                                   EGLint count) {
+    HOST("eglSwapBuffersWithDamageEXT", EGLBoolean (*)(EGLDisplay, EGLSurface, const EGLint *, EGLint))
+    EGLBoolean swapped = host(display, surface, rects, count);
+    pace(surface);
+    return swapped;
 }
 
 static void *shim_for(const char *name) {
@@ -181,6 +319,18 @@ static void *shim_for(const char *name) {
         return (void *)shim_eglCreateWindowSurface;
     if (strcmp(name, "eglSwapBuffers") == 0)
         return (void *)shim_eglSwapBuffers;
+    if (strcmp(name, "eglSwapBuffersWithDamageKHR") == 0)
+        return (void *)shim_eglSwapBuffersWithDamageKHR;
+    if (strcmp(name, "eglSwapBuffersWithDamageEXT") == 0)
+        return (void *)shim_eglSwapBuffersWithDamageEXT;
+    if (strcmp(name, "eglDestroySurface") == 0)
+        return (void *)shim_eglDestroySurface;
+    if (strcmp(name, "eglMakeCurrent") == 0)
+        return (void *)shim_eglMakeCurrent;
+    if (strcmp(name, "eglSwapInterval") == 0)
+        return (void *)shim_eglSwapInterval;
+    if (strcmp(name, "eglTerminate") == 0)
+        return (void *)shim_eglTerminate;
     if (strcmp(name, "eglChooseConfig") == 0)
         return (void *)shim_eglChooseConfig;
     if (strcmp(name, "eglGetConfigAttrib") == 0)

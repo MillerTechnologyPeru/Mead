@@ -27,6 +27,34 @@ public enum SDL {
     public nonisolated(unsafe) static var getGamepadVendor: (@convention(c) (Pointer?) -> UInt16)!
     public nonisolated(unsafe) static var getGamepadProduct: (@convention(c) (Pointer?) -> UInt16)!
     public nonisolated(unsafe) static var pushEvent: (@convention(c) (EventPointer?) -> Bool)!
+    public nonisolated(unsafe) static var pumpEvents: (@convention(c) () -> Void)!
+    public nonisolated(unsafe) static var getWindowSurface: (@convention(c) (Pointer?) -> UnsafeMutablePointer<mead_sdl_surface>?)!
+    public nonisolated(unsafe) static var updateWindowSurface: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var convertPixels: (@convention(c) (Int32, Int32, UInt32, UnsafeRawPointer?, Int32, UInt32, Pointer?, Int32) -> Bool)!
+    public nonisolated(unsafe) static var getPrimaryDisplay: (@convention(c) () -> UInt32)!
+    public nonisolated(unsafe) static var getCurrentDisplayMode: (@convention(c) (UInt32) -> UnsafePointer<mead_sdl_display_mode>?)!
+    public nonisolated(unsafe) static var getDisplayContentScale: (@convention(c) (UInt32) -> Float)!
+    public nonisolated(unsafe) static var registerEvents: (@convention(c) (Int32) -> UInt32)!
+    public nonisolated(unsafe) static var getWindowID: (@convention(c) (Pointer?) -> UInt32)!
+    public nonisolated(unsafe) static var createPopupWindow: (@convention(c) (Pointer?, Int32, Int32, Int32, Int32, UInt64) -> Pointer?)!
+    public nonisolated(unsafe) static var setWindowParent: (@convention(c) (Pointer?, Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var setWindowModal: (@convention(c) (Pointer?, Bool) -> Bool)!
+    public nonisolated(unsafe) static var setWindowSize: (@convention(c) (Pointer?, Int32, Int32) -> Bool)!
+    public nonisolated(unsafe) static var setWindowPosition: (@convention(c) (Pointer?, Int32, Int32) -> Bool)!
+    public nonisolated(unsafe) static var showWindow: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var hideWindow: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var raiseWindow: (@convention(c) (Pointer?) -> Bool)!
+    public typealias AudioCallback = @convention(c) (Pointer?, Pointer?, Int32, Int32) -> Void
+    public nonisolated(unsafe) static var openAudioDeviceStream: (@convention(c) (UInt32, UnsafePointer<mead_sdl_audio_spec>?, AudioCallback?, Pointer?) -> Pointer?)!
+    public nonisolated(unsafe) static var putAudioStreamData: (@convention(c) (Pointer?, UnsafeRawPointer?, Int32) -> Bool)!
+    public nonisolated(unsafe) static var getAudioStreamQueued: (@convention(c) (Pointer?) -> Int32)!
+    public nonisolated(unsafe) static var pauseAudioStreamDevice: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var resumeAudioStreamDevice: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var clearAudioStream: (@convention(c) (Pointer?) -> Bool)!
+    public nonisolated(unsafe) static var setAudioStreamGain: (@convention(c) (Pointer?, Float) -> Bool)!
+    public nonisolated(unsafe) static var setAudioStreamFrequencyRatio: (@convention(c) (Pointer?, Float) -> Bool)!
+    public nonisolated(unsafe) static var destroyAudioStream: (@convention(c) (Pointer?) -> Void)!
+    public nonisolated(unsafe) static var getAudioDeviceFormat: (@convention(c) (UInt32, UnsafeMutablePointer<mead_sdl_audio_spec>?, UnsafeMutablePointer<Int32>?) -> Bool)!
 
     public static var lastError: String {
         getError?().map { String(cString: $0) } ?? "SDL is not loaded"
@@ -71,6 +99,33 @@ public enum SDL {
         getGamepadVendor = bind("SDL_GetGamepadVendor")
         getGamepadProduct = bind("SDL_GetGamepadProduct")
         pushEvent = bind("SDL_PushEvent")
+        pumpEvents = bind("SDL_PumpEvents")
+        getWindowSurface = bind("SDL_GetWindowSurface")
+        updateWindowSurface = bind("SDL_UpdateWindowSurface")
+        convertPixels = bind("SDL_ConvertPixels")
+        getPrimaryDisplay = bind("SDL_GetPrimaryDisplay")
+        getCurrentDisplayMode = bind("SDL_GetCurrentDisplayMode")
+        getDisplayContentScale = bind("SDL_GetDisplayContentScale")
+        registerEvents = bind("SDL_RegisterEvents")
+        getWindowID = bind("SDL_GetWindowID")
+        createPopupWindow = bind("SDL_CreatePopupWindow")
+        setWindowParent = bind("SDL_SetWindowParent")
+        setWindowModal = bind("SDL_SetWindowModal")
+        setWindowSize = bind("SDL_SetWindowSize")
+        setWindowPosition = bind("SDL_SetWindowPosition")
+        showWindow = bind("SDL_ShowWindow")
+        hideWindow = bind("SDL_HideWindow")
+        raiseWindow = bind("SDL_RaiseWindow")
+        openAudioDeviceStream = bind("SDL_OpenAudioDeviceStream")
+        putAudioStreamData = bind("SDL_PutAudioStreamData")
+        getAudioStreamQueued = bind("SDL_GetAudioStreamQueued")
+        pauseAudioStreamDevice = bind("SDL_PauseAudioStreamDevice")
+        resumeAudioStreamDevice = bind("SDL_ResumeAudioStreamDevice")
+        clearAudioStream = bind("SDL_ClearAudioStream")
+        setAudioStreamGain = bind("SDL_SetAudioStreamGain")
+        setAudioStreamFrequencyRatio = bind("SDL_SetAudioStreamFrequencyRatio")
+        destroyAudioStream = bind("SDL_DestroyAudioStream")
+        getAudioDeviceFormat = bind("SDL_GetAudioDeviceFormat")
         return complete
     }
 }

@@ -18,6 +18,11 @@ extern "C" {
 // already loaded is returned again.
 void *mead_load_library(const char *path, char **error);
 
+// Starts the providers without loading a library first, as a run that
+// begins in Java does: each gets the loader's interface (mead_interface.h)
+// now, or as soon as it is opened. Loading a library starts them anyway.
+void mead_start_providers(const char *progname);
+
 // Looks a symbol up in the library `handle` names, what it needs, and the
 // providers, as dlsym does; a NULL handle searches everything. NULL if
 // missing.

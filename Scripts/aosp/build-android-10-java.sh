@@ -1,0 +1,68 @@
+#!/bin/bash
+# Builds Android 10's Java for Mead on ART in an Android 10 tree (run inside
+# Scripts/aosp/Dockerfile's image, from the tree's top): the boot class path
+# and the framework, as dex jars, gathered into out/mead-java. Dex doesn't
+# depend on the CPU, so these are the jars Android 10 ships.
+set -eu
+# Android 10's boot class path, as build/make/core/envsetup.mk and
+# target/product/base_system.mk list it (ICU4J is inside core-libart until
+# Android 11).
+modules="core-oj core-libart okhttp bouncycastle apache-xml conscrypt framework ext telephony-common voip-common ims-common updatable-media android.test.base"
+# Device projects aren't checked out, and some generic ones refer to
+# them; nothing built here needs them.
+export ALLOW_MISSING_DEPENDENCIES=true
+# AOSP's setup reads variables it never sets.
+set +u
+source build/envsetup.sh
+lunch aosp_arm64-eng
+m -j"${JOBS:-4}" $modules framework-res
+set -u
+
+out=out/mead-java
+mkdir -p "$out"
+for module in $modules; do
+    jar=$(find out/target/product/generic_arm64 -name "$module.jar" -path "*/framework/*" | head -1)
+    if [ -z "$jar" ]; then
+        jar=$(find out/target/common/obj/JAVA_LIBRARIES/${module}_intermediates -name "javalib.jar" | head -1)
+    fi
+    [ -n "$jar" ] || { echo "no jar for $module" >&2; exit 1; }
+    cp "$jar" "$out/$module.jar"
+done
+# The framework's own resources (android.R), which every app's Resources
+# sits on.
+cp out/target/product/generic_arm64/system/framework/framework-res.apk "$out/"
+
+# The data the core library reads, from $ANDROID_RUNTIME_ROOT/etc and
+# $ANDROID_TZDATA_ROOT/etc: ICU4J's data (ICU 63) and the time zones.
+mkdir -p "$out/etc/icu" "$out/etc/tz"
+cp external/icu/icu4c/source/stubdata/icudt63l.dat \
+   system/timezone/output_data/icu_overlay/icu_tzdata.dat "$out/etc/icu/"
+cp system/timezone/output_data/iana/tzdata \
+   system/timezone/output_data/version/tz_version \
+   system/timezone/output_data/android/tzlookup.xml "$out/etc/tz/"
+# Conscrypt's CA certificates, from $ANDROID_ROOT/etc/security/cacerts.
+mkdir -p "$out/etc/security/cacerts"
+cp system/ca-certificates/files/* "$out/etc/security/cacerts/"
+# The system fonts, from $ANDROID_ROOT/fonts with their list in
+# $ANDROID_ROOT/etc/fonts.xml (Android's /system/fonts and
+# /system/etc/fonts.xml): every font the list names.
+mkdir -p "$out/fonts"
+cp frameworks/base/data/fonts/fonts.xml "$out/etc/"
+# A font's file name follows its <font> tag, before the font's end or its
+# variable axes.
+for font in $(grep -oE '>[[:space:]]*[^<>[:space:]]+\.(ttf|ttc|otf)' frameworks/base/data/fonts/fonts.xml | tr -d '> ' | sort -u); do
+    found=$(find external/roboto-fonts external/noto-fonts external/google-fonts external/naver-fonts \
+                 frameworks/base/data/fonts -name "$font" | head -1)
+    [ -n "$found" ] || { echo "no font $font" >&2; exit 1; }
+    cp "$found" "$out/fonts/"
+done
+# The key character maps input devices use, from
+# $ANDROID_ROOT/usr/keychars (Android's /system/usr/keychars).
+mkdir -p "$out/usr/keychars"
+cp frameworks/base/data/keyboards/Generic.kcm frameworks/base/data/keyboards/Virtual.kcm "$out/usr/keychars/"
+
+# $ANDROID_ROOT/usr/keylayout (Android's /system/usr/keylayout): evdev
+# scancodes to keycodes, for the Wayland bridge's keyboard.
+mkdir -p "$out/usr/keylayout"
+cp frameworks/base/data/keyboards/Generic.kl "$out/usr/keylayout/"
+ls -lR "$out"

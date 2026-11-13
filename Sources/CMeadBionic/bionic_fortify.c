@@ -156,3 +156,11 @@ int bionic___poll_chk(struct pollfd *descriptors, nfds_t count, int timeout, siz
         overflow("poll");
     return poll(descriptors, count, timeout);
 }
+
+// glibc has __pread64_chk, in bionic's argument order, but no pwrite one.
+ssize_t bionic___pwrite64_chk(int descriptor, const void *buffer, size_t count, off64_t offset,
+                              size_t buffer_size) {
+    if (count > buffer_size)
+        overflow("pwrite64");
+    return pwrite64(descriptor, buffer, count, offset);
+}

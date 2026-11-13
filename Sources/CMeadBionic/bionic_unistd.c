@@ -5,8 +5,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
+#include <termios.h>
 #include <unistd.h>
 
 // bionic numbers sysconf's and pathconf's names differently from glibc.
@@ -172,3 +174,23 @@ char *bionic_basename(const char *path) {
 }
 
 mode_t bionic___umask_chk(mode_t mode) { return umask(mode); }
+
+// A terminal's attributes, as bionic gets and sets them: the kernel's
+// struct termios, which is smaller than glibc's (no speeds, 19 control
+// characters), so glibc's own would write past an Android caller's.
+int bionic_tcgetattr(int descriptor, void *attributes) {
+    return ioctl(descriptor, TCGETS, attributes);
+}
+
+int bionic_tcsetattr(int descriptor, int when, const void *attributes) {
+    unsigned long request;
+    switch (when) {
+    case TCSANOW: request = TCSETS; break;
+    case TCSADRAIN: request = TCSETSW; break;
+    case TCSAFLUSH: request = TCSETSF; break;
+    default:
+        errno = EINVAL;
+        return -1;
+    }
+    return ioctl(descriptor, request, attributes);
+}

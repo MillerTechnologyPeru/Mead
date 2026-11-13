@@ -44,3 +44,10 @@ RUN apt-get update \
         libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libwayland-egl1 \
         libvulkan1 mesa-vulkan-drivers xvfb xauth \
  && rm -rf /var/lib/apt/lists/*
+
+# Wayland for ART's display bridge: libwayland-client and libwayland-egl to
+# link with, and wayland-protocols' XML, which wayland-scanner turns into
+# Sources/CMeadWayland (Scripts/generate-wayland-protocols.sh).
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libwayland-dev wayland-protocols \
+ && rm -rf /var/lib/apt/lists/*

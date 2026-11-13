@@ -84,10 +84,34 @@ enum {
 
 #define MEAD_SDL_WINDOW_FULLSCREEN 0x1ull
 #define MEAD_SDL_WINDOW_RESIZABLE 0x20ull
+#define MEAD_SDL_WINDOW_HIDDEN 0x8ull
+#define MEAD_SDL_WINDOW_POPUP_MENU 0x80000ull
 #define MEAD_SDL_WINDOW_VULKAN 0x10000000ull
 
 #define MEAD_SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK 0xFFFFFFFFu
 #define MEAD_SDL_AUDIO_DEVICE_DEFAULT_RECORDING 0xFFFFFFFEu
+
+#define MEAD_SDL_PIXELFORMAT_ABGR8888 0x16762004u
+
+// The start of SDL_Surface: what a window's surface is drawn through.
+typedef struct mead_sdl_surface {
+    uint32_t flags;
+    uint32_t format;
+    int32_t w;
+    int32_t h;
+    int32_t pitch;
+    void *pixels;
+} mead_sdl_surface;
+
+// The start of SDL_DisplayMode.
+typedef struct mead_sdl_display_mode {
+    uint32_t displayID;
+    uint32_t format;
+    int32_t w;
+    int32_t h;
+    float pixel_density;
+    float refresh_rate;
+} mead_sdl_display_mode;
 
 typedef struct mead_sdl_audio_spec {
     int32_t format;
