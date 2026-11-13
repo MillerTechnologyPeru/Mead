@@ -12,6 +12,13 @@ extension ART {
         return access(path, R_OK) == 0 ? path : nil
     }
 
+    /// mead-backports.jar beside it: framework classes with later Androids'
+    /// public methods, which go ahead of framework.jar on the boot class path.
+    static func meadBackports(providerDirectory: String) -> String? {
+        let path = "\(providerDirectory)/mead-backports.jar"
+        return access(path, R_OK) == 0 ? path : nil
+    }
+
     /// libgui's `mead_gui_get_display`, which the display service answers
     /// from.
     nonisolated(unsafe) static var getDisplay: (@convention(c) (UnsafeMutableRawPointer) -> Void)?
