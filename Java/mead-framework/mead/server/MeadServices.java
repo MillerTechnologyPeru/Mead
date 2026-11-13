@@ -25,6 +25,7 @@ public final class MeadServices {
 
     /** The activity manager, which broadcasts for PendingIntents. */
     static final ActivityManagerService sActivityManager = new ActivityManagerService();
+    static final ThermalService sThermal = new ThermalService();
 
     private MeadServices() {}
 
@@ -68,8 +69,11 @@ public final class MeadServices {
         services.put(Context.WIFI_SERVICE, new WifiManagerService());
         services.put(Context.MEDIA_SESSION_SERVICE, new MediaSessionService());
         services.put(Context.CONNECTIVITY_SERVICE, new ConnectivityService());
+        services.put(Context.THERMAL_SERVICE, sThermal);
         for (Map.Entry<String, IBinder> service : services.entrySet()) {
             ServiceManager.addService(service.getKey(), service.getValue());
         }
+        // Power saving, the screen and thermals change on the host.
+        HostWatcher.start();
     }
 }
