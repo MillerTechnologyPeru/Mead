@@ -501,8 +501,11 @@ final class Wayland {
                 if width != frame.width || height != frame.height {
                     bridge.postWindowEvent(kind: 1, window: window, width: width, height: height)
                 }
-            } else if width != window.width || height != window.height {
-                bridge.resize(window, width: width, height: height)
+            } else {
+                window.unsentCompositorSize = (width, height)
+                if width != window.width || height != window.height {
+                    bridge.resize(window, width: width, height: height)
+                }
             }
         }
         window.pendingSize = nil
