@@ -771,7 +771,41 @@ a second takes two vsyncs, 35–38 ms), in a half-screen tile beside
 EmulationStation, as ART's windows don't take `MEAD_FULLSCREEN` yet. After
 about a minute with no input the regulator drops the menu to 30, as the
 game does on a phone. GNOME answers every mapped surface, so the Duet
-never showed the 5.
+never showed the 5. ART's windows now open fullscreen with
+`MEAD_FULLSCREEN`.
+
+SpongeBob Battle for Bikini Bottom Rehydrated (Unreal Engine 4, base APK
+and two OBBs in shared storage's `Android/obb/<package>`) reaches its 3D
+main menu on the Retroid (2026-11-12), fullscreen on Vulkan at 25–30
+frames a second, and takes the gamepad. What it needed:
+- The APK's native libraries installed into the app's library directory
+  (`NativeLibraries.java`), as the package manager does.
+- NativeActivity: AOSP's JNI in the fork's libandroid_runtime, loading
+  the game's library with `bionic_dlopen`; and InputQueue. AOSP's own
+  libandroid sources for input, assets, configurations and native
+  activities are built into the runtime as `mead_ndk_<name>`, which Mead's
+  loader prefers over its libandroid provider while ART runs.
+- EGL14 and GLES 2.0–3.1's Java bindings (Unreal probes the GPU with
+  them); EGL14 on Mead's windowing connection and windows.
+- Services: sensors (none, stubbed natives), Wi-Fi (off), memory
+  (`/proc/meminfo`), MediaPlayer and MediaExtractor (stubbed: no videos;
+  an empty `libmedia_jni.so` beside the runtime's natives, not built by
+  anything yet), the manifest's version (Unreal names its OBBs by it),
+  and Vulkan's features where the host has a driver (else Unreal uses
+  GLES).
+- libc: `sysinfo`, wide-character classes, terminal attributes and a few
+  fortify and data symbols.
+- A surface's width and height are its own, as Android's buffer queue
+  answers, not the geometry the app set: Unreal sets an 8×8 probe
+  geometry, sized its view by the answer and saved 8×8 in
+  `GameUserSettings.ini`.
+- An app's `eglTerminate` leaves the display initialized, as Android's
+  counted EGL does: Unreal terminates it after its GPU probe, which ended
+  hwui's display, and hwui aborted at the next view redraw (a gamepad
+  press).
+- A compositor's size from before the window manager gave a frame is
+  passed on once it does (sway's fullscreen configure came first).
+Not yet: videos, gameplay beyond the menu, the Duet.
 
 ### Phase 7: remove MeadJNI
 
