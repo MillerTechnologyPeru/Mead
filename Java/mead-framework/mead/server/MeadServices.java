@@ -75,5 +75,7 @@ public final class MeadServices {
         }
         // Power saving, the screen and thermals change on the host.
         HostWatcher.start();
+        // WebViews are WPE WebKit's, where a phone's are Chromium's.
+        mead.webkit.MeadWebViewFactory.install();
     }
 }
