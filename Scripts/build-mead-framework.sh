@@ -8,11 +8,17 @@
 #
 # Usage: build-mead-framework.sh <framework classes.jar> <dx.jar> <output.jar>
 # The framework's classes are its compile-time classes.jar from an Android 10
-# build (out/target/common/obj/JAVA_LIBRARIES/framework_intermediates).
+# build (out/target/common/obj/JAVA_LIBRARIES/framework_intermediates). The
+# core library's, from core-libart_intermediates, beside it as
+# core-libart-classes.jar, are on the classpath too when they're there:
+# backported framework classes use dalvik.system and org.xmlpull.
 set -eu
 framework=$1
 dx=$2
 output=$3
+core="$(dirname "$framework")/core-libart-classes.jar"
+classpath="$framework"
+[ -f "$core" ] && classpath="$framework:$core"
 source=$(cd "$(dirname "$0")/../Java/mead-framework" && pwd)
 # Stand-ins for classes the framework's interfaces name from outside its
 # classes.jar; compiled against only, never into the jar.
@@ -42,14 +48,14 @@ backports=$(mktemp -d)
 trap 'rm -rf "$classes" "$backports"' EXIT
 # The backports first: Mead's framework calls into them.
 find "$backports_source" -name '*.java' > "$backports/sources"
-javac -encoding UTF-8 -nowarn --release 8 -cp "$framework" -d "$backports" @"$backports/sources"
+javac -encoding UTF-8 -nowarn --release 8 -cp "$classpath" -d "$backports" @"$backports/sources"
 rm "$backports/sources"
 java -jar "$dx" --dex --min-sdk-version=29 --output="$backports_output" "$backports"
 no_call_sites "$backports_output"
 # The service bases, generated from the framework's interfaces.
 python3 "$(dirname "$0")/generate-service-bases.py" "$framework" "$classes/generated"
 find "$source" "$classes/generated" -name '*.java' > "$classes/sources"
-javac -encoding UTF-8 -nowarn --release 8 -cp "$backports:$framework" -sourcepath "$stubs" -implicit:none -d "$classes" @"$classes/sources"
+javac -encoding UTF-8 -nowarn --release 8 -cp "$backports:$classpath" -sourcepath "$stubs" -implicit:none -d "$classes" @"$classes/sources"
 rm -r "$classes/sources" "$classes/generated"
 java -jar "$dx" --dex --min-sdk-version=29 --output="$output" "$classes"
 no_call_sites "$output"
