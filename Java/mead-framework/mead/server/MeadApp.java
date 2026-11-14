@@ -264,6 +264,12 @@ public final class MeadApp {
         }
     }
 
+    /** The running app's data directory; null when Mead runs a dex without an app. */
+    public static String currentDataDir() {
+        MeadApp app = sCurrent;
+        return app != null ? app.dataDir() : null;
+    }
+
     /** Where the app keeps its data: ~/.mead/apps/<package>. */
     String dataDir() {
         String home = System.getenv("HOME");
