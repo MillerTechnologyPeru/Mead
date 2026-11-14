@@ -46,6 +46,14 @@ public class ActivityCheck extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         check("onCreate", getPackageName() + " " + getClass().getName(), "mead.check mead.check.ActivityCheck");
+        List<android.app.ActivityManager.AppTask> tasks =
+                ((android.app.ActivityManager) getSystemService(Context.ACTIVITY_SERVICE)).getAppTasks();
+        check("app tasks", tasks.size(), 1);
+        android.app.ActivityManager.RecentTaskInfo task = tasks.get(0).getTaskInfo();
+        check("task", task.taskId + " " + task.baseActivity.getClassName() + " " + task.numActivities,
+                "1 mead.check.ActivityCheck 1");
+        check("ignoring battery optimizations", ((android.os.PowerManager) getSystemService(Context.POWER_SERVICE))
+                .isIgnoringBatteryOptimizations(getPackageName()), true);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         mView = new CheckView(this);
         setContentView(mView);
