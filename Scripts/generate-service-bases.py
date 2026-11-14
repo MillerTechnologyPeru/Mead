@@ -38,6 +38,7 @@ INTERFACES = [
     ("android.media.session.ISessionManager", "SessionManagerBase"),
     ("android.net.IConnectivityManager", "ConnectivityManagerBase"),
     ("android.os.IThermalService", "ThermalServiceBase"),
+    ("android.os.IDeviceIdleController", "DeviceIdleControllerBase"),
 ]
 
 # Plain interfaces and abstract classes, the base written for each, and
