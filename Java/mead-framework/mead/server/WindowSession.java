@@ -388,11 +388,14 @@ final class WindowSession extends WindowSessionBase {
         state.surfaceControl = surfaceControl;
         state.surface = new Surface();
         state.surface.copyFrom(surfaceControl);
+        // Its id first: setting the frame can post a size the compositor gave
+        // already (a fullscreen window's), which compositorResized finds the
+        // window by.
+        state.bridgeId = WindowManagerService.nativeWindowId(state.surface);
         Rect insets = state.attrs.surfaceInsets;
         WindowManagerService.nativeSetFrameInSurface(state.surface, insets.left, insets.top, state.width,
                 state.height);
         WindowManagerService.nativeSetDimBehind(state.surface, dimAmount(state));
-        state.bridgeId = WindowManagerService.nativeWindowId(state.surface);
         if (state.serverChannel != null) {
             WindowManagerService.nativeAttachInput(state.surface, state.serverChannel);
         }
