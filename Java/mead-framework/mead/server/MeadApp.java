@@ -62,6 +62,8 @@ public final class MeadApp {
     /** Its split APKs' names and paths (an asset pack is one); none for a dex. */
     private final String[] mSplitNames;
     private final String[] mSplitPaths;
+    /** Who signed the APK, from its own signature; unknown for a dex. */
+    final PackageParser.SigningDetails signingDetails;
 
     static volatile MeadApp sCurrent;
 
@@ -76,6 +78,7 @@ public final class MeadApp {
         this.height = height;
         requestedPermissions = Collections.emptyList();
         mSplitNames = mSplitPaths = new String[0];
+        signingDetails = PackageParser.SigningDetails.UNKNOWN;
         mApplication = new ApplicationInfo();
         mApplication.packageName = packageName;
         mApplication.targetSdkVersion = 29;
@@ -113,10 +116,19 @@ public final class MeadApp {
             mSplitNames[index] = splits.get(index).splitName;
             mSplitPaths[index] = splits.get(index).codePath;
         }
+        signingDetails = signingDetails(parsed);
         mApplication = parsed.applicationInfo;
         // The application's meta-data, as GET_META_DATA gives it: Play
         // services' clients look for com.google.android.gms.version there.
         mApplication.metaData = parsed.mAppMetaData;
+        // Packs fetched through Play, from local files, by Play Core's local
+        // testing: the meta-data bundletool's --local-testing would add.
+        if (AssetPacks.install(sourcePath, packageName)) {
+            if (mApplication.metaData == null) mApplication.metaData = new android.os.Bundle();
+            if (mApplication.metaData.getString(AssetPacks.META_DATA) == null) {
+                mApplication.metaData.putString(AssetPacks.META_DATA, AssetPacks.FOLDER);
+            }
+        }
         for (PackageParser.Service service : parsed.services) {
             android.content.pm.ServiceInfo info = new android.content.pm.ServiceInfo(service.info);
             info.metaData = service.metaData;
@@ -140,6 +152,20 @@ public final class MeadApp {
         apks.add(sourcePath);
         Collections.addAll(apks, mSplitPaths);
         NativeLibraries.install(apks, new File(dataDir(), "lib"));
+    }
+
+    /**
+     * The APK's signers, as the package manager verifies them at install:
+     * the certificates of its v3, v2 or v1 signature, after checking it.
+     */
+    private static PackageParser.SigningDetails signingDetails(PackageParser.Package parsed) {
+        try {
+            PackageParser.collectCertificates(parsed, false);
+            return parsed.mSigningDetails;
+        } catch (PackageParser.PackageParserException e) {
+            System.err.println("mead: " + parsed.packageName + "'s signature doesn't verify: " + e.getMessage());
+            return PackageParser.SigningDetails.UNKNOWN;
+        }
     }
 
     /**
@@ -191,7 +217,7 @@ public final class MeadApp {
         if (sourcePath.endsWith(".apk")) {
             int width = pixels(args.length >= 2 ? Integer.parseInt(args[0]) : 1280);
             int height = pixels(args.length >= 2 ? Integer.parseInt(args[1]) : 720);
-            PackageParser.Package parsed = new PackageParser().parsePackage(new File(sourcePath), 0);
+            PackageParser.Package parsed = parse(new File(sourcePath));
             sCurrent = new MeadApp(parsed, sourcePath, width, height);
         } else {
             if (args.length < 2) {
@@ -203,6 +229,39 @@ public final class MeadApp {
             sCurrent = new MeadApp(args[0], args[1], sourcePath, width, height);
         }
         ActivityThread.main(new String[0]);
+    }
+
+    /**
+     * The app's manifest, parsed. One that asks for a newer Android than
+     * Mead's (minSdkVersion above Build.VERSION.SDK_INT) is run anyway, on
+     * Mead's: apps check the version before calling newer APIs, and they
+     * still see Mead's. The parser's own version is raised for that parse
+     * alone.
+     */
+    private static PackageParser.Package parse(File apk) throws PackageParser.PackageParserException {
+        try {
+            return new PackageParser().parsePackage(apk, 0);
+        } catch (PackageParser.PackageParserException e) {
+            java.util.regex.Matcher wanted = java.util.regex.Pattern.compile("Requires newer sdk version #(\\d+)")
+                    .matcher(String.valueOf(e.getMessage()));
+            if (!wanted.find()) throw e;
+            int version = Integer.parseInt(wanted.group(1));
+            System.err.println("mead: " + apk.getName() + " asks for API " + version + "; it runs on Mead's, API "
+                    + android.os.Build.VERSION.SDK_INT);
+            try {
+                java.lang.reflect.Field field = PackageParser.class.getDeclaredField("SDK_VERSION");
+                field.setAccessible(true);
+                int platform = field.getInt(null);
+                field.setInt(null, version);
+                try {
+                    return new PackageParser().parsePackage(apk, 0);
+                } finally {
+                    field.setInt(null, platform);
+                }
+            } catch (ReflectiveOperationException reflection) {
+                throw e;
+            }
+        }
     }
 
     /** Where the app keeps its data: ~/.mead/apps/<package>. */

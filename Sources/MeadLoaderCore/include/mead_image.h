@@ -86,8 +86,8 @@ void *mead_image_symbol_address(const mead_image *image, const Elf64_Sym *symbol
 
 // Takes the write permission off every segment the program headers say is
 // not writable, and puts execute where they say it belongs, after
-// relocations have been applied. Segments stay writable when the image
-// never gave up the right (Android libraries' RELRO is not enforced here).
+// relocations have been applied; then makes the RELRO region read-only, as
+// Android's linker does.
 void mead_image_protect(mead_image *image);
 
 #endif

@@ -226,5 +226,16 @@ void mead_image_protect(mead_image *image) {
         if (to > from && mprotect(mead_image_address(image, from), (size_t)(to - from), prot) != 0)
             mead_fatal("cannot protect a segment of %s: %s", image->path, strerror(errno));
     }
+    // RELRO, read-only once relocated, as Android's linker leaves it
+    // (phdr_table_protect_gnu_relro): from its first page through the page
+    // its end falls in. Code that reads its own mappings sees what it would
+    // on a phone.
+    const Elf64_Phdr *relro = mead_image_segment(image, PT_GNU_RELRO);
+    if (relro != NULL && relro->p_memsz > 0) {
+        uint64_t from = relro->p_vaddr & ~((uint64_t)page - 1);
+        uint64_t to = (relro->p_vaddr + relro->p_memsz + (uint64_t)page - 1) & ~((uint64_t)page - 1);
+        if (mprotect(mead_image_address(image, from), (size_t)(to - from), PROT_READ) != 0)
+            mead_fatal("cannot protect the RELRO of %s: %s", image->path, strerror(errno));
+    }
     image->hardened = true;
 }

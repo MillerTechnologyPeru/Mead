@@ -27,4 +27,20 @@ final class AudioService extends AudioServiceBase {
     @Override public int getMode() { return AudioSystem.MODE_NORMAL; }
     @Override public int getRingerModeExternal() { return AudioManager.RINGER_MODE_NORMAL; }
     @Override public boolean isSpeakerphoneOn() { return false; }
+
+    /**
+     * Audio focus: Mead runs one app, so its requests are granted, as
+     * Android grants the only app asking; giving it up always succeeds.
+     */
+    @Override public int requestAudioFocus(android.media.AudioAttributes attributes, int durationHint,
+            android.os.IBinder cb, android.media.IAudioFocusDispatcher dispatcher, String clientId,
+            String callingPackageName, int flags, android.media.audiopolicy.IAudioPolicyCallback policyCallback,
+            int sdk) {
+        return android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
+
+    @Override public int abandonAudioFocus(android.media.IAudioFocusDispatcher dispatcher, String clientId,
+            android.media.AudioAttributes attributes, String callingPackageName) {
+        return android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+    }
 }

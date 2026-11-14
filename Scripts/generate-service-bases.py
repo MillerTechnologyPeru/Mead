@@ -32,6 +32,8 @@ INTERFACES = [
     ("android.content.IContentService", "ContentServiceBase"),
     ("android.net.wifi.IWifiManager", "WifiManagerBase"),
     ("android.media.session.ISessionManager", "SessionManagerBase"),
+    ("android.net.IConnectivityManager", "ConnectivityManagerBase"),
+    ("android.os.IThermalService", "ThermalServiceBase"),
 ]
 
 METHOD = re.compile(r"^\s*public abstract (.+?) (\w+)\((.*)\)( throws [\w.$, ]+)?;$")
