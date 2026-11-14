@@ -1,6 +1,7 @@
 package mead.server;
 
 import android.app.ActivityManager;
+import android.app.IAppTask;
 import android.app.IApplicationThread;
 import android.app.IRequestFinishCallback;
 import android.app.ProfilerInfo;
@@ -305,6 +306,70 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
             if (record == null || (onlyRoot && record != root())) return -1;
             return 1;
         }
+    }
+
+    /** The app's one task (ID 1, as getTaskForActivity has it), while it has an activity. */
+    @Override
+    public List<IBinder> getAppTasks(String callingPackage) {
+        List<IBinder> tasks = new ArrayList<>();
+        synchronized (this) {
+            if (root() != null) tasks.add(mAppTask);
+        }
+        return tasks;
+    }
+
+    private final AppTask mAppTask = new AppTask();
+
+    /** ActivityManager.AppTask's binder: the app's task. */
+    private final class AppTask extends IAppTask.Stub {
+        @Override
+        public void finishAndRemoveTask() {
+            List<IBinder> tokens = new ArrayList<>();
+            synchronized (ActivityTaskManagerService.this) {
+                for (int i = mStack.size() - 1; i >= 0; i--) {
+                    if (!mStack.get(i).finishing) tokens.add(mStack.get(i).token);
+                }
+            }
+            for (IBinder token : tokens) finishActivity(token, android.app.Activity.RESULT_CANCELED, null, 0);
+        }
+
+        @Override
+        public ActivityManager.RecentTaskInfo getTaskInfo() {
+            ActivityManager.RecentTaskInfo info = new ActivityManager.RecentTaskInfo();
+            synchronized (ActivityTaskManagerService.this) {
+                ActivityRecord root = root();
+                ActivityRecord top = top();
+                info.id = info.persistentId = info.taskId = 1;
+                info.isRunning = root != null;
+                info.userId = android.os.UserHandle.myUserId();
+                info.lastActiveTime = android.os.SystemClock.elapsedRealtime();
+                if (root != null) {
+                    info.baseIntent = new Intent(root.intent);
+                    info.baseActivity = info.origActivity = info.realActivity =
+                            new ComponentName(root.info.packageName, root.info.name);
+                    info.topActivity = new ComponentName(top.info.packageName, top.info.name);
+                }
+                for (ActivityRecord record : mStack) {
+                    if (!record.finishing) info.numActivities++;
+                }
+            }
+            return info;
+        }
+
+        /** The one task is in front already. */
+        @Override
+        public void moveToFront(IApplicationThread caller, String callingPackage) {}
+
+        @Override
+        public int startActivity(IBinder whoThread, String callingPackage, Intent intent, String resolvedType,
+                Bundle options) {
+            return ActivityTaskManagerService.this.startActivity(null, callingPackage, intent, resolvedType, null,
+                    null, -1, 0, null, options);
+        }
+
+        /** Mead has no recent tasks screen. */
+        @Override
+        public void setExcludeFromRecents(boolean exclude) {}
     }
 
     /** The bottom activity not finishing: the task's root. */
