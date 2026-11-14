@@ -4,6 +4,10 @@ interfaces named, a class extending its Stub that answers every method the
 way a service that doesn't do it would (nothing, false, 0 or null), and says
 so in the log once. Mead's services extend these and override what they do.
 
+It writes the same for some of the framework's plain interfaces and
+abstract classes (PLAIN), a base implementing or extending them: the
+WebView provider's, which Mead's WebView (mead.webkit) builds on.
+
 Usage: generate-service-bases.py <framework classes.jar> <output directory>
 The interfaces come from javap on the framework's classes."""
 
@@ -34,6 +38,17 @@ INTERFACES = [
     ("android.media.session.ISessionManager", "SessionManagerBase"),
     ("android.net.IConnectivityManager", "ConnectivityManagerBase"),
     ("android.os.IThermalService", "ThermalServiceBase"),
+]
+
+# Plain interfaces and abstract classes, the base written for each, and
+# whether it implements or extends it.
+PLAIN = [
+    ("android.webkit.WebViewFactoryProvider", "WebViewFactoryProviderBase", "implements"),
+    ("android.webkit.WebViewFactoryProvider$Statics", "WebViewStaticsBase", "implements"),
+    ("android.webkit.WebViewProvider", "WebViewProviderBase", "implements"),
+    ("android.webkit.WebViewProvider$ViewDelegate", "WebViewViewDelegateBase", "implements"),
+    ("android.webkit.WebViewProvider$ScrollDelegate", "WebViewScrollDelegateBase", "implements"),
+    ("android.webkit.WebSettings", "WebSettingsBase", "extends"),
 ]
 
 METHOD = re.compile(r"^\s*public abstract (.+?) (\w+)\((.*)\)( throws [\w.$, ]+)?;$")
@@ -72,7 +87,7 @@ def default_return(type_name):
     return "null"
 
 
-def base_class(framework, interface, name):
+def base_class(framework, interface, name, relation=None):
     listing = subprocess.run(["javap", "-public", "-cp", framework, interface],
                              check=True, capture_output=True, text=True).stdout
     methods = []
@@ -81,13 +96,16 @@ def base_class(framework, interface, name):
         if not match:
             continue
         returns, method, parameters, throws = match.groups()
+        modifiers = ""
+        if returns.startswith("synchronized "):
+            modifiers, returns = "synchronized ", returns[len("synchronized "):]
         types = [java_type(t) for t in split_parameters(parameters)]
         arguments = ", ".join(f"{t} p{i}" for i, t in enumerate(types))
         body = f'        MeadServices.unimplemented("{interface.rsplit(".", 1)[1]}.{method}");\n'
         value = default_return(returns)
         if value is not None:
             body += f"        return {value};\n"
-        methods.append(f"    @Override\n    public {java_type(returns)} {method}({arguments})"
+        methods.append(f"    @Override\n    public {modifiers}{java_type(returns)} {method}({arguments})"
                        f"{java_type(throws or '')} {{\n{body}    }}\n")
     if not methods:
         sys.exit(f"javap listed no methods of {interface}")
@@ -96,7 +114,9 @@ def base_class(framework, interface, name):
             f"package mead.server.base;\n\n"
             f"import mead.server.MeadServices;\n\n"
             f"/** {interface}, with every method answered as by a service that doesn't do it. */\n"
-            f"public abstract class {name} extends {java_type(interface)}.Stub {{\n"
+            f"public abstract class {name} "
+            + (f"{relation} {java_type(interface)}" if relation else f"extends {java_type(interface)}.Stub")
+            + " {\n"
             + "\n".join(methods) + "}\n")
 
 
@@ -107,6 +127,9 @@ def main():
     for interface, name in INTERFACES:
         with open(os.path.join(directory, f"{name}.java"), "w") as file:
             file.write(base_class(framework, interface, name))
+    for type_name, name, relation in PLAIN:
+        with open(os.path.join(directory, f"{name}.java"), "w") as file:
+            file.write(base_class(framework, type_name, name, relation))
 
 
 main()
