@@ -159,4 +159,17 @@ public interface WindowInsetsController {
     default void hideInputMethod() {
         hide(ime());
     }
+
+    /**
+     * Android 11's control of the windows causing insets, frame by frame.
+     * Mead's windows' insets don't animate, so the request can't be
+     * fulfilled: the listener hears it cancelled, with no controller, as
+     * Android 11 says when the window can't control them.
+     */
+    default void controlWindowInsetsAnimation(@InsetType int types, long durationMillis,
+            @android.annotation.Nullable android.view.animation.Interpolator interpolator,
+            @android.annotation.Nullable android.os.CancellationSignal cancellationSignal,
+            @NonNull WindowInsetsAnimationControlListener listener) {
+        listener.onCancelled(null);
+    }
 }

@@ -206,6 +206,28 @@ public final class MeadApp {
      * setprop would. Doesn't return.
      */
     public static void main(String[] args) throws Exception {
+        // As Android's RuntimeInit does: an uncaught exception is logged
+        // before the app's own handler (a crash reporter's) sees it, so it
+        // shows even when that handler never returns.
+        // libcore's Thread.setUncaughtExceptionPreHandler is hidden from the
+        // framework's compile, hence the reflection.
+        Thread.class.getMethod("setUncaughtExceptionPreHandler", Thread.UncaughtExceptionHandler.class)
+                .invoke(null, new Thread.UncaughtExceptionHandler() {
+                    @Override
+                    public void uncaughtException(Thread thread, Throwable e) {
+                        logFatal(thread, e);
+                    }
+                });
+        // Android's default handler (RuntimeInit's KillApplicationHandler)
+        // logs the exception too, when the pre-handler didn't see it, as for
+        // one kotlinx's coroutines hand straight to the thread's handler. It
+        // then kills the app; Mead's only logs it, and the app keeps running.
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread thread, Throwable e) {
+                logFatal(thread, e);
+            }
+        });
         String properties = System.getenv("MEAD_PROPERTIES");
         if (properties != null) {
             for (String property : properties.split(";")) {
@@ -366,6 +388,39 @@ public final class MeadApp {
      * command line), in the display's pixels: twice as many on a display
      * scaled twice, whose density is twice too.
      */
+    /** The uncaught exceptions logged so far: each is logged once, by whichever handler sees it first. */
+    private static final java.util.Set<Throwable> sLoggedFatal =
+            java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Throwable, Boolean>());
+
+    /**
+     * Logs an uncaught exception as Android's RuntimeInit does ("FATAL
+     * EXCEPTION"), its causes included. The trace is written a frame at a
+     * time, so one that can't be printed whole still shows.
+     */
+    private static void logFatal(Thread thread, Throwable e) {
+        synchronized (sLoggedFatal) {
+            if (!sLoggedFatal.add(e)) return;
+        }
+        StringBuilder text = new StringBuilder("FATAL EXCEPTION: ").append(thread.getName())
+                .append("\nProcess: ").append(Process.myPid());
+        String prefix = "\n";
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String description;
+            try {
+                description = t.toString();
+            } catch (Throwable unprintable) {
+                description = t.getClass().getName() + " (its message couldn't be read: " + unprintable + ")";
+            }
+            text.append(prefix).append(description);
+            for (StackTraceElement frame : t.getStackTrace()) {
+                text.append("\n\tat ").append(frame);
+            }
+            prefix = "\nCaused by: ";
+            if (t.getCause() == t) break;
+        }
+        android.util.Log.e("AndroidRuntime", text.toString());
+    }
+
     private static int pixels(int logical) {
         return Math.round(logical * DisplayManagerService.density());
     }

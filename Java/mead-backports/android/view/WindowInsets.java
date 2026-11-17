@@ -873,7 +873,8 @@ public final class WindowInsets {
         return typeInsetsMap;
     }
 
-    private static Insets insetInsets(Insets insets, int left, int top, int right, int bottom) {
+    // Mead: package-private, as Android 11's, for WindowInsetsAnimation.Bounds.
+    static Insets insetInsets(Insets insets, int left, int top, int right, int bottom) {
         int newLeft = Math.max(0, insets.left - left);
         int newTop = Math.max(0, insets.top - top);
         int newRight = Math.max(0, insets.right - right);

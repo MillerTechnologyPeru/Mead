@@ -2682,6 +2682,9 @@ public class PhoneWindow extends Window implements MenuBuilder.Callback {
         mForceDecorInstall = false;
         if (mDecor == null) {
             mDecor = generateDecor(-1);
+            // Mead: so that the decor's views can find the window's back
+            // dispatcher (View.findOnBackInvokedDispatcher).
+            MeadOnBackInvokedDispatcher.attach(mDecor, this);
             mDecor.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             mDecor.setIsRootNamespace(true);
             if (!mInvalidatePanelMenuPosted && mInvalidatePanelMenuFeatures != 0) {
