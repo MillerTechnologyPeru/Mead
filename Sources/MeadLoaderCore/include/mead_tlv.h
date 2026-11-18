@@ -31,19 +31,23 @@ int64_t mead_tlv_tprel(const mead_image *image);
 uint64_t mead_tlv_dtprel(const mead_image *image);
 
 // This thread's block for `image`, allocating nothing (the block comes with
-// the thread). NULL when `image` has no PT_TLS segment.
+// the thread), with its initial values. NULL when `image` has no PT_TLS
+// segment.
 void *mead_tlv_block(const mead_image *image);
 
-// Copies every image's initial image into the calling thread's block. The
-// loader does it for the main thread; the bionic shim's pthread_create does
-// it for the threads it makes.
+// Copies the initial image of every image the calling thread doesn't have
+// yet into its block. The loader does it for the thread loading; the bionic
+// shim's pthread_create for the threads it makes; the TLS descriptor
+// resolver for any other thread (ART's, Java's) and for images loaded after
+// a thread began, before it hands out an offset.
 void mead_tlv_thread_init(void);
 
 // How big the block is: what every thread's stack must have room for.
 size_t mead_tlv_block_bytes(void);
 
 // The TLS descriptor resolver fixups point descriptors at: handed the
-// descriptor, it gives back the TP-relative offset in its value half.
+// descriptor, it gives back the TP-relative offset in its value half, once
+// the calling thread has every image's initial values.
 // x0 in, x0 out, and every other register preserved, as the TLSDESC ABI
 // asks; assembly for that reason.
 int64_t mead_tlsdesc_resolve(const void *descriptor);
