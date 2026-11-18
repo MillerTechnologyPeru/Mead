@@ -108,10 +108,17 @@ final class WindowSession extends WindowSessionBase {
             state.compositorHeight = height;
             Rect frame = new Rect(0, 0, width, height);
             MeadApp app = MeadApp.sCurrent;
+            // An activity's window is the app's: its new size is the app's
+            // new configuration, which the process hears before the window
+            // its new frame, as Android tells a resized task's activities.
+            if (app != null && state.attrs.type == WindowManager.LayoutParams.TYPE_BASE_APPLICATION
+                    && app.resized(width, height)) {
+                MeadServices.sActivityTaskManager.configurationChanged(app.configuration());
+            }
             Configuration config = app != null ? app.configuration() : new Configuration();
             try {
                 state.window.resized(frame, new Rect(), new Rect(), new Rect(), new Rect(), new Rect(), false,
-                        new MergedConfiguration(config, new Configuration()), frame, true, false,
+                        new MergedConfiguration(config, config), frame, true, false,
                         android.view.Display.DEFAULT_DISPLAY, new DisplayCutout.ParcelableWrapper(DisplayCutout.NO_CUTOUT));
             } catch (RemoteException e) {
                 // The window is in this process.
@@ -304,7 +311,9 @@ final class WindowSession extends WindowSessionBase {
         outBackdropFrame.set(outFrame);
         MeadApp app = MeadApp.sCurrent;
         Configuration config = app != null ? app.configuration() : new Configuration();
-        mergedConfiguration.setConfiguration(config, new Configuration());
+        // The activity's task's override is the window's configuration too
+        // (ActivityTaskManagerService.launch).
+        mergedConfiguration.setConfiguration(config, config);
         updateFocus();
         return result;
     }
