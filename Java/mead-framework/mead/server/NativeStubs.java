@@ -11,7 +11,9 @@ import java.util.List;
  * read hardware Mead doesn't offer (the sensor service: with every native
  * answering zero, the sensor manager lists no sensors, as on a device
  * without any, and Unreal Engine games carry on; the camera service: the
- * camera reports none, and YouTube carries on). Mead registers a native
+ * camera reports none, and YouTube carries on; the audio policy: it lists
+ * no product strategies or volume groups, so AudioAttributes maps legacy
+ * stream types itself, as FMOD's AudioTrack needs). Mead registers a native
  * doing nothing and returning zero for each of their native methods, listed
  * by signatures().
  */
@@ -21,7 +23,8 @@ public final class NativeStubs {
     /** The classes. */
     public static final String[] CLASSES = {"android.util.StatsLog", "android.util.StatsLogInternal",
             "android.hardware.SystemSensorManager", "android.hardware.SystemSensorManager$BaseEventQueue",
-            "android.media.MediaPlayer", "android.media.MediaExtractor", "android.hardware.Camera"};
+            "android.media.MediaPlayer", "android.media.MediaExtractor", "android.hardware.Camera",
+            "android.media.audiopolicy.AudioProductStrategy", "android.media.audiopolicy.AudioVolumeGroup"};
 
     /** A class's native methods, as "name" then its JNI descriptor, alternately. */
     public static String[] signatures(String className) throws ClassNotFoundException {
