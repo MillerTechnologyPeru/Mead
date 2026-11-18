@@ -127,7 +127,7 @@ extension ARTDisplay {
             let parentWindow = parent.flatMap { display.window(env: env, surface: $0) }
             guard let window = display.createWindow(title: name, width: max(width, 1), height: max(height, 1),
                                                     kind: WindowKind(rawValue: kind) ?? .normal, parent: parentWindow,
-                                                    x: x, y: y),
+                                                    x: x, y: y, framed: true),
                   let surface = window.surface else { return 0 }
             return jlong(display.functions.surfaceControlCreate(surface))
         }
