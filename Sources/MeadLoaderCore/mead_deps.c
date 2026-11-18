@@ -17,10 +17,12 @@
 // Which provider library stands in for which Android soname. A NULL file
 // marks the sonames Mead expects from the game's own directory when no
 // provider claims them; those and every other unknown soname load as stubs
-// whose symbols answer with the unimplemented stub.
+// whose symbols answer with the unimplemented stub. A host provider is the
+// host's own library of that name (host_library), not one beside mead.
 static const struct {
     const char *soname;
     const char *file;
+    bool host;
 } providers[] = {
     { "libc.so",          "libMeadBionic.so" },
     { "libm.so",          "libMeadBionic.so" },
@@ -42,6 +44,12 @@ static const struct {
     { "libnativehelper.so", "libMeadAndroid.so" },
     // No Android soname: listed so that mead --dex finds ART's runner.
     { "libmead_art.so",   "libMeadART.so" },
+    // ICU's C API, which apps reach by dlopen as Android lets them (.NET's
+    // globalization does): opaque handles, UChars and error codes, nothing
+    // of the C library's crossing it, so the host's serves as it is. Its
+    // symbols carry its version (u_strlen_78), which callers look for.
+    { "libicuuc.so",      "libicuuc.so",   true },
+    { "libicui18n.so",    "libicui18n.so", true },
 };
 #define PROVIDER_COUNT (sizeof(providers) / sizeof(providers[0]))
 
@@ -88,6 +96,38 @@ const char *mead_deps_provider_for(const char *soname) {
     return NULL;
 }
 
+// A loaded host library whose file is `name` with a version after it
+// (libicuuc.so.78), found by its path.
+struct versioned_search {
+    const char *name;
+    char path[4096];
+};
+
+static int find_versioned(struct dl_phdr_info *info, size_t size, void *context) {
+    (void)size;
+    struct versioned_search *search = context;
+    const char *slash = info->dlpi_name ? strrchr(info->dlpi_name, '/') : NULL;
+    const char *file = slash ? slash + 1 : info->dlpi_name;
+    size_t length = strlen(search->name);
+    if (!file || strncmp(file, search->name, length) != 0 || file[length] != '.')
+        return 0;
+    snprintf(search->path, sizeof(search->path), "%s", info->dlpi_name);
+    return 1;
+}
+
+// The host's library `name`: the version already loaded, as ART's libcore
+// loads ICU before any app runs, so that there is one of it in the
+// process; else whichever the host's linker finds by that name.
+static void *host_library(const char *name) {
+    struct versioned_search search = { .name = name };
+    if (dl_iterate_phdr(find_versioned, &search)) {
+        void *loaded = dlopen(search.path, RTLD_NOW | RTLD_NOLOAD);
+        if (loaded)
+            return loaded;
+    }
+    return dlopen(name, RTLD_NOW | RTLD_LOCAL);
+}
+
 // The provider at `index`'s table place, dlopen'd once, whether that worked
 // or not: binding asks for thousands of symbols. NULL when it cannot be
 // opened (reported once).
@@ -96,7 +136,8 @@ static void *open_provider(size_t index) {
         provider_tried[index] = true;
         char path[4096];
         snprintf(path, sizeof(path), "%s/%s", provider_dir, providers[index].file);
-        provider_handles[index] = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+        provider_handles[index] = providers[index].host ? host_library(providers[index].file)
+                                                        : dlopen(path, RTLD_NOW | RTLD_LOCAL);
         if (!provider_handles[index]) {
             mead_trace("load", "no provider for %s: %s", providers[index].soname, dlerror());
         } else if (provider_opened) {
