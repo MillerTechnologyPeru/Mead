@@ -18,6 +18,7 @@ import android.app.servertransaction.StopActivityItem;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.ConfigurationInfo;
 import android.content.res.CompatibilityInfo;
 import android.content.res.Configuration;
 import android.os.Binder;
@@ -25,6 +26,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.PersistableBundle;
 import android.os.Process;
+import android.os.SystemProperties;
 import android.os.RemoteException;
 import android.util.Log;
 import java.util.ArrayList;
@@ -483,5 +485,29 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
     @Override
     public Bundle getActivityOptions(IBinder token) {
         return null;
+    }
+
+    /**
+     * What the device has, as Android's ActivityTaskManagerService says it:
+     * its configuration's touchscreen, keyboard and navigation, and the
+     * OpenGL ES version (ro.opengles.version).
+     */
+    @Override
+    public ConfigurationInfo getDeviceConfigurationInfo() {
+        ConfigurationInfo info = new ConfigurationInfo();
+        Configuration config = MeadApp.sCurrent.configuration();
+        info.reqTouchScreen = config.touchscreen;
+        info.reqKeyboardType = config.keyboard;
+        info.reqNavigation = config.navigation;
+        if (config.navigation == Configuration.NAVIGATION_DPAD
+                || config.navigation == Configuration.NAVIGATION_TRACKBALL) {
+            info.reqInputFeatures |= ConfigurationInfo.INPUT_FEATURE_FIVE_WAY_NAV;
+        }
+        if (config.keyboard != Configuration.KEYBOARD_UNDEFINED && config.keyboard != Configuration.KEYBOARD_NOKEYS) {
+            info.reqInputFeatures |= ConfigurationInfo.INPUT_FEATURE_HARD_KEYBOARD;
+        }
+        info.reqGlEsVersion = SystemProperties.getInt("ro.opengles.version",
+                ConfigurationInfo.GL_ES_VERSION_UNDEFINED);
+        return info;
     }
 }
