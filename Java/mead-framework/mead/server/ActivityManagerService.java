@@ -19,6 +19,8 @@ import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.RemoteException;
 import mead.server.base.ActivityManagerBase;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Android's activity manager for Mead: one app, in this process. When its
@@ -40,7 +42,17 @@ final class ActivityManagerService extends ActivityManagerBase {
         }
         ApplicationInfo application = app.applicationInfo();
         Configuration config = app.configuration();
-        thread.bindApplication(application.processName, application, null, null, null, null, null, null,
+        // Its content providers in this process, which ActivityThread
+        // installs before the application's onCreate, as Android's
+        // generateApplicationProvidersLocked gives them: .NET for Android
+        // starts its runtime from one, androidx Startup its initializers.
+        // Those of other processes start when asked for (getContentProvider).
+        List<ProviderInfo> providers = new ArrayList<>();
+        for (ProviderInfo provider : app.providerInfos(application)) {
+            if (application.processName.equals(provider.processName)) providers.add(provider);
+        }
+        thread.bindApplication(application.processName, application, providers.isEmpty() ? null : providers,
+                null, null, null, null, null,
                 0, false, false, false, false, config, CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO,
                 null, new Bundle(), "unknown", null, null);
 
@@ -49,10 +61,48 @@ final class ActivityManagerService extends ActivityManagerBase {
 
     private SettingsProvider mSettings;
 
-    /** The system's content providers: settings. */
+    /** The app's providers ActivityThread has installed, by authority. */
+    private final Map<String, ContentProviderHolder> mPublished = new HashMap<>();
+
+    @Override
+    public void publishContentProviders(IApplicationThread caller, List<ContentProviderHolder> providers) {
+        if (providers == null) return;
+        synchronized (mPublished) {
+            for (ContentProviderHolder holder : providers) {
+                if (holder == null || holder.info == null || holder.info.authority == null) continue;
+                for (String authority : holder.info.authority.split(";")) mPublished.put(authority, holder);
+            }
+        }
+    }
+
+    @Override
+    public boolean refContentProvider(IBinder connection, int stable, int unstable) {
+        return true;
+    }
+
+    @Override
+    public void removeContentProvider(IBinder connection, boolean stable) {}
+
+    /**
+     * A content provider: one of the app's, published, or for one in a
+     * process of its own, its info, which has the caller install it, as
+     * Android does for a provider that may run in the caller's process (Mead
+     * runs one); or the system's: settings.
+     */
     @Override
     public ContentProviderHolder getContentProvider(IApplicationThread caller, String callingPackage, String name,
             int userId, boolean stable) {
+        synchronized (mPublished) {
+            ContentProviderHolder published = mPublished.get(name);
+            if (published != null) return published;
+        }
+        MeadApp app = MeadApp.sCurrent;
+        ProviderInfo own = app != null ? app.providerForAuthority(name, app.applicationInfo()) : null;
+        if (own != null) {
+            ContentProviderHolder holder = new ContentProviderHolder(own);
+            holder.noReleaseNeeded = true;
+            return holder;
+        }
         if (!SettingsProvider.AUTHORITY.equals(name)) return null;
         ProviderInfo info = new ProviderInfo();
         info.authority = SettingsProvider.AUTHORITY;

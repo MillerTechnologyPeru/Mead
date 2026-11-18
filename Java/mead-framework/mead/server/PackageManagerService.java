@@ -10,6 +10,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageParser;
 import android.content.pm.ParceledListSlice;
+import android.content.pm.ProviderInfo;
 import android.content.pm.ResolveInfo;
 import android.content.pm.Signature;
 import android.content.pm.SigningInfo;
@@ -88,6 +89,10 @@ final class PackageManagerService extends PackageManagerBase {
         if ((flags & PackageManager.GET_ACTIVITIES) != 0) {
             info.activities = app.activityInfos(info.applicationInfo).toArray(new ActivityInfo[0]);
         }
+        if ((flags & PackageManager.GET_PROVIDERS) != 0) {
+            List<ProviderInfo> providers = app.providerInfos(info.applicationInfo);
+            if (!providers.isEmpty()) info.providers = providers.toArray(new ProviderInfo[0]);
+        }
         // Its signers, as Android's PackageParser.generatePackageInfo gives
         // them: GET_SIGNATURES has the oldest signer of a rotated key.
         PackageParser.SigningDetails signing = app.signingDetails;
@@ -129,6 +134,33 @@ final class PackageManagerService extends PackageManagerBase {
     public android.content.pm.ServiceInfo getServiceInfo(ComponentName component, int flags, int userId) {
         MeadApp app = app(component.getPackageName());
         return app != null ? app.serviceInfo(component.getClassName(), app.applicationInfo()) : null;
+    }
+
+    @Override
+    public ProviderInfo getProviderInfo(ComponentName component, int flags, int userId) {
+        MeadApp app = app(component.getPackageName());
+        return app != null ? app.providerInfo(component.getClassName(), app.applicationInfo()) : null;
+    }
+
+    @Override
+    public ProviderInfo resolveContentProvider(String authority, int flags, int userId) {
+        MeadApp app = MeadApp.sCurrent;
+        return app != null ? app.providerForAuthority(authority, app.applicationInfo()) : null;
+    }
+
+    /** The app's enabled providers, of a process and with a meta-data key when asked. */
+    @Override
+    public ParceledListSlice queryContentProviders(String processName, int uid, int flags, String metaDataKey) {
+        MeadApp app = MeadApp.sCurrent;
+        List<ProviderInfo> infos = new ArrayList<>();
+        if (app != null) {
+            for (ProviderInfo info : app.providerInfos(app.applicationInfo())) {
+                if (processName != null && !processName.equals(info.processName)) continue;
+                if (metaDataKey != null && (info.metaData == null || !info.metaData.containsKey(metaDataKey))) continue;
+                infos.add(info);
+            }
+        }
+        return new ParceledListSlice<>(infos);
     }
 
     @Override

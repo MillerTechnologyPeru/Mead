@@ -9,7 +9,9 @@ import android.app.ResultInfo;
 import android.app.servertransaction.ActivityLifecycleItem;
 import android.app.servertransaction.ActivityResultItem;
 import android.app.servertransaction.ClientTransaction;
+import android.app.servertransaction.ActivityConfigurationChangeItem;
 import android.app.servertransaction.ClientTransactionItem;
+import android.app.servertransaction.ConfigurationChangeItem;
 import android.app.servertransaction.DestroyActivityItem;
 import android.app.servertransaction.LaunchActivityItem;
 import android.app.servertransaction.PauseActivityItem;
@@ -116,10 +118,40 @@ final class ActivityTaskManagerService extends ActivityTaskManagerBase {
         }
     }
 
+    /**
+     * The configuration changed (the app's window was resized): the process
+     * hears it as Android's ActivityThread hears the system's, which updates
+     * its resources and tells its application and activities
+     * (onConfigurationChanged).
+     */
+    void configurationChanged(Configuration config) {
+        if (mThread == null) return;
+        ClientTransaction transaction = ClientTransaction.obtain(mThread, null);
+        transaction.addCallback(ConfigurationChangeItem.obtain(config));
+        try {
+            mThread.scheduleTransaction(transaction);
+        } catch (RemoteException e) {
+            // The app is in this process.
+        }
+        // And each activity its task's new bounds, as Android tells a
+        // resized task's activities, which their display metrics follow.
+        List<ActivityRecord> records;
+        synchronized (this) {
+            records = new ArrayList<>(mStack);
+        }
+        for (ActivityRecord record : records) {
+            if (!record.finishing) schedule(record, ActivityConfigurationChangeItem.obtain(new Configuration(config)), null);
+        }
+    }
+
     private void launch(ActivityRecord record) {
+        // The window's configuration is its task's override too, as a
+        // freeform task's on Android: its bounds are the activity's display
+        // metrics (Display.getMetrics, Resources.getDisplayMetrics), not the
+        // whole display's.
         Configuration config = MeadApp.sCurrent.configuration();
         schedule(record, LaunchActivityItem.obtain(record.intent, System.identityHashCode(record.token), record.info,
-                config, new Configuration(), CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO, null, null,
+                config, new Configuration(config), CompatibilityInfo.DEFAULT_COMPATIBILITY_INFO, null, null,
                 ActivityManager.PROCESS_STATE_TOP, null, null, null, null, true, null, new Binder()),
                 ResumeActivityItem.obtain(true));
     }

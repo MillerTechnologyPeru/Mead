@@ -48,8 +48,15 @@ public final class MeadApp {
     /** The manifest's version name; null for a dex or a manifest without one. */
     final String versionName;
     final String sourcePath;
-    final int width;
-    final int height;
+    /**
+     * Its window's size in pixels: as started, then as the compositor last
+     * resized it (Android's task bounds), which its configuration says.
+     */
+    volatile int width;
+    volatile int height;
+    /** The configuration's sequence number: each new one is newer, as ActivityThread needs to apply it. */
+    private static final java.util.concurrent.atomic.AtomicInteger sConfigurationSeq =
+            new java.util.concurrent.atomic.AtomicInteger(1);
     /** The launcher activity's class. */
     final String activityName;
     /** What the manifest says of the application, without where it's installed. */
@@ -57,6 +64,8 @@ public final class MeadApp {
     private final Map<String, Activity> mActivities = new LinkedHashMap<>();
     /** Its services, by class name, with their meta-data. */
     private final Map<String, android.content.pm.ServiceInfo> mServices = new LinkedHashMap<>();
+    /** Its content providers, by class name, with their meta-data. */
+    private final Map<String, android.content.pm.ProviderInfo> mProviders = new LinkedHashMap<>();
     /** The permissions the manifest asks for. */
     final List<String> requestedPermissions;
     /** Its split APKs' names and paths (an asset pack is one); none for a dex. */
@@ -137,6 +146,11 @@ public final class MeadApp {
             android.content.pm.ServiceInfo info = new android.content.pm.ServiceInfo(service.info);
             info.metaData = service.metaData;
             mServices.put(info.name, info);
+        }
+        for (PackageParser.Provider provider : parsed.providers) {
+            android.content.pm.ProviderInfo info = new android.content.pm.ProviderInfo(provider.info);
+            info.metaData = provider.metaData;
+            mProviders.put(info.name, info);
         }
         String launcher = null;
         for (PackageParser.Activity activity : parsed.activities) {
@@ -384,6 +398,49 @@ public final class MeadApp {
         return info;
     }
 
+    /**
+     * A content provider, by its class name, with the installed application;
+     * null for none. Its meta-data, as GET_META_DATA gives it: androidx
+     * Startup finds its initializers on InitializationProvider's.
+     */
+    android.content.pm.ProviderInfo providerInfo(String name, ApplicationInfo application) {
+        android.content.pm.ProviderInfo provider = mProviders.get(name);
+        if (provider == null) return null;
+        android.content.pm.ProviderInfo info = new android.content.pm.ProviderInfo(provider);
+        info.applicationInfo = application;
+        info.metaData = provider.metaData;
+        if (info.processName == null) info.processName = application.processName;
+        return info;
+    }
+
+    /** The enabled content provider with an authority, with the installed application; null for none. */
+    android.content.pm.ProviderInfo providerForAuthority(String authority, ApplicationInfo application) {
+        for (android.content.pm.ProviderInfo provider : mProviders.values()) {
+            if (!provider.enabled || provider.authority == null) continue;
+            for (String name : provider.authority.split(";")) {
+                if (name.equals(authority)) return providerInfo(provider.name, application);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The enabled content providers, with the installed application, highest
+     * initOrder first, as the package manager lists them for a process.
+     */
+    List<android.content.pm.ProviderInfo> providerInfos(ApplicationInfo application) {
+        List<android.content.pm.ProviderInfo> infos = new ArrayList<>();
+        for (android.content.pm.ProviderInfo provider : mProviders.values()) {
+            if (provider.enabled) infos.add(providerInfo(provider.name, application));
+        }
+        Collections.sort(infos, new Comparator<android.content.pm.ProviderInfo>() {
+            @Override public int compare(android.content.pm.ProviderInfo a, android.content.pm.ProviderInfo b) {
+                return Integer.compare(b.initOrder, a.initOrder);
+            }
+        });
+        return infos;
+    }
+
     /** The launcher activity. */
     ActivityInfo activityInfo(ApplicationInfo application) {
         return activityInfo(activityName, application);
@@ -463,11 +520,23 @@ public final class MeadApp {
     }
 
     /** The app's configuration: its window's size, on the display's density. */
+    /**
+     * Its window was resized: its configuration says the new size, as a
+     * newer configuration. False when the size is the same.
+     */
+    synchronized boolean resized(int width, int height) {
+        if (width == this.width && height == this.height) return false;
+        this.width = width;
+        this.height = height;
+        sConfigurationSeq.incrementAndGet();
+        return true;
+    }
+
     Configuration configuration() {
         float density = DisplayManagerService.density();
         Configuration config = new Configuration();
         config.setToDefaults();
-        config.seq = 1;
+        config.seq = sConfigurationSeq.get();
         config.densityDpi = Math.round(density * 160);
         config.screenWidthDp = Math.round(width / density);
         config.screenHeightDp = Math.round(height / density);

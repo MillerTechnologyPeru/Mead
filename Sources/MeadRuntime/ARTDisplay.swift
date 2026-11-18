@@ -187,6 +187,11 @@ final class ARTDisplay {
         /// given a frame (a fullscreen window's first configure can come
         /// first); the window manager is told it once the frame arrives.
         var unsentCompositorSize: (width: Int32, height: Int32)?
+        /// Whether the window manager made it, and so gives it a frame (its
+        /// geometry) just after; a toplevel configured before the frame
+        /// arrived has its first buffer wait for it (ARTWayland.configured).
+        var framed = false
+        var backgroundPending = false
         var maximized = false
         /// Whether the compositor has stopped showing it: xdg_toplevel's
         /// suspended state, or its frame callbacks held back; and what the
@@ -488,10 +493,11 @@ final class ARTDisplay {
     /// which holds the reference `mead_surface_create` gave; nil, with the
     /// reason on standard error, when there's no window to be had.
     func createWindow(title: String, width: Int32, height: Int32, kind: WindowKind = .normal, parent: Window? = nil,
-                      x: Int32 = 0, y: Int32 = 0) -> Window? {
+                      x: Int32 = 0, y: Int32 = 0, framed: Bool = false) -> Window? {
         let made: Window?? = onDisplayThread { [self] in
             guard let wayland else { return nil }
             let window = Window(id: nextWindowID, kind: kind, parent: parent, x: x, y: y, width: width, height: height)
+            window.framed = framed
             nextWindowID += 1
             guard wayland.makeSurfaces(for: window, title: title) else {
                 Self.report("the compositor made no window")

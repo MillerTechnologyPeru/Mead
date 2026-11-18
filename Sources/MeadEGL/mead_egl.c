@@ -25,6 +25,8 @@ enum {
     EGL_NONE = 0x3038,
     EGL_NATIVE_VISUAL_ID = 0x302e,
     EGL_DRAW = 0x3059,
+    EGL_CLIENT_APIS = 0x308d,
+    EGL_OPENGL_ES_API = 0x30a0,
     EGL_RECORDABLE_ANDROID = 0x3142,
     EGL_FRAMEBUFFER_TARGET_ANDROID = 0x3147,
     WINDOW_FORMAT_RGBA_8888 = 1,
@@ -251,6 +253,27 @@ static EGLBoolean shim_eglGetConfigAttrib(EGLDisplay display, EGLConfig config, 
     return 1;
 }
 
+// Android's EGL has OpenGL ES alone. The host's may have desktop OpenGL
+// too (Mesa's does), and an app that tries it first, as MonoGame does
+// before falling back to ES, would take the host's GL for its own and look
+// for a desktop libGL. Binding any other API fails, as on Android, with
+// the host's own EGL_BAD_PARAMETER: it is handed an API that isn't one.
+static EGLBoolean shim_eglBindAPI(uint32_t api) {
+    HOST("eglBindAPI", EGLBoolean (*)(uint32_t))
+    if (api == EGL_OPENGL_ES_API)
+        return host(api);
+    host(0);
+    return 0;
+}
+
+static const char *shim_eglQueryString(EGLDisplay display, EGLint name) {
+    HOST("eglQueryString", const char *(*)(EGLDisplay, EGLint))
+    const char *value = host(display, name);
+    if (name == EGL_CLIENT_APIS && value)
+        return "OpenGL_ES";
+    return value;
+}
+
 static void *shim_eglGetProcAddress(const char *name);
 
 // MEAD_FRAME_DUMP=path — writes the frame about to be shown to `path` as a
@@ -337,6 +360,10 @@ static void *shim_for(const char *name) {
         return (void *)shim_eglGetConfigAttrib;
     if (strcmp(name, "eglGetProcAddress") == 0)
         return (void *)shim_eglGetProcAddress;
+    if (strcmp(name, "eglBindAPI") == 0)
+        return (void *)shim_eglBindAPI;
+    if (strcmp(name, "eglQueryString") == 0)
+        return (void *)shim_eglQueryString;
     return NULL;
 }
 

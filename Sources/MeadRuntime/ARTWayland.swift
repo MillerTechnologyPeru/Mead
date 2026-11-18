@@ -493,6 +493,8 @@ final class Wayland {
     /// size (the compositor's, when it gives one).
     fileprivate func configured(_ window: ARTDisplay.Window, serial: UInt32) {
         xdg_surface_ack_configure(window.xdgSurface, serial)
+        Self.trace("configure window \(window.id): \(window.pendingSize.map { "\($0.width)×\($0.height)" } ?? "no size")"
+            + (window.maximized ? ", maximized" : "") + ", frame \(window.frame.map { "\($0.width)×\($0.height)" } ?? "none")")
         if let size = window.pendingSize, size.width > 0, size.height > 0 {
             let width = size.width * scale, height = size.height * scale
             if let frame = window.frame {
@@ -509,12 +511,26 @@ final class Wayland {
             }
         }
         window.pendingSize = nil
+        window.configured = true
+        // A toplevel's first buffer waits for its window geometry, its
+        // frame, which the window manager gives just after making it: with
+        // none, the compositor takes the whole surface, shadow and all, for
+        // the window, and configures that size back, which would grow the
+        // window by its shadow.
+        if window.framed, window.toplevel != nil, window.frame == nil {
+            window.backgroundPending = true
+            return
+        }
+        attachBackground(window)
+    }
+
+    /// The root's background, at the window's size, committed.
+    private func attachBackground(_ window: ARTDisplay.Window) {
         guard let root = window.root else { return }
         wl_surface_attach(root, backgroundBuffer(), 0, 0)
         wp_viewport_set_destination(window.rootViewport, logical(window.width), logical(window.height))
         wl_surface_damage_buffer(root, 0, 0, 1, 1)
         wl_surface_commit(root)
-        window.configured = true
     }
 
     /// The window's surfaces at a new size.
@@ -546,7 +562,13 @@ final class Wayland {
         guard window.toplevel != nil, let xdgSurface = window.xdgSurface, let frame = window.frame else { return }
         xdg_surface_set_window_geometry(xdgSurface, logicalPosition(frame.x), logicalPosition(frame.y),
                                         logical(frame.width), logical(frame.height))
-        if let root = window.root, window.mapped { wl_surface_commit(root) }
+        if window.backgroundPending {
+            // Its first buffer, with its geometry.
+            window.backgroundPending = false
+            attachBackground(window)
+        } else if let root = window.root, window.mapped {
+            wl_surface_commit(root)
+        }
     }
 
     /// The latest serial of a press or touch, which moving and resizing
@@ -1234,59 +1256,62 @@ final class Wayland {
 
     nonisolated(unsafe) private static let pointerListener: UnsafeMutablePointer<wl_pointer_listener> = {
         let listener = UnsafeMutablePointer<wl_pointer_listener>.allocate(capacity: 1)
-        listener.initialize(to: wl_pointer_listener(
-            enter: { data, _, serial, surface, x, y in
-                guard let wayland = wayland(data), let surface else { return }
-                wayland.pointerWindow = wayland.windows[surface]
-                trace("pointer on window \(wayland.pointerWindow?.id ?? 0)")
-                wayland.pointerX = wayland.pixels(x)
-                wayland.pointerY = wayland.pixels(y)
-                // A new enter: the compositor's cursor until it's set again.
-                wayland.enterSerial = serial
-                wayland.shownCursor = nil
-                wayland.updateCursor()
-            },
-            leave: { data, _, _, _ in wayland(data)?.pointerWindow = nil },
-            motion: { data, _, _, x, y in
-                guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
-                wayland.pointerX = wayland.pixels(x)
-                wayland.pointerY = wayland.pixels(y)
-                wayland.updateCursor()
-                wayland.bridge.pointerMoved(window, x: wayland.pointerX, y: wayland.pointerY)
-            },
-            button: { data, _, serial, _, button, state in
-                guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
-                if state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue) {
-                    wayland.pressSerial = serial
-                    if button == 0x110, wayland.resizeFromEdge(window, x: wayland.pointerX, y: wayland.pointerY) { return }
-                }
-                // Linux's BTN_LEFT, BTN_RIGHT and BTN_MIDDLE.
-                let android: Int32
-                switch button {
-                case 0x110: android = ARTDisplay.Android.buttonPrimary
-                case 0x111: android = ARTDisplay.Android.buttonSecondary
-                case 0x112: android = ARTDisplay.Android.buttonTertiary
-                default: return
-                }
-                wayland.bridge.pointerButton(window, button: android,
-                                             down: state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue),
-                                             x: wayland.pointerX, y: wayland.pointerY)
-            },
-            axis: { data, _, _, axis, value in
-                guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
-                // About 10 per wheel notch, down and right positive; Android's
-                // scroll is in notches, up and right positive.
-                let notches = Float(wl_fixed_to_double(value)) / 10
-                let vertical = axis == UInt32(WL_POINTER_AXIS_VERTICAL_SCROLL.rawValue)
-                wayland.bridge.pointerScrolled(window, x: wayland.pointerX, y: wayland.pointerY,
-                                               vertical: vertical ? -notches : 0, horizontal: vertical ? 0 : notches)
-            },
-            frame: { _, _ in },
-            axis_source: { _, _, _ in },
-            axis_stop: { _, _, _, _ in },
-            axis_discrete: { _, _, _, _ in },
-            axis_value120: { _, _, _, _ in },
-            axis_relative_direction: { _, _, _, _ in }))
+        // Each event the bound version (5) can send, and later ones'; a
+        // newer libwayland's further events (warp, version 10) stay unset,
+        // as the seat is never bound at their version.
+        listener.initialize(to: wl_pointer_listener())
+        listener.pointee.enter = { data, _, serial, surface, x, y in
+            guard let wayland = wayland(data), let surface else { return }
+            wayland.pointerWindow = wayland.windows[surface]
+            trace("pointer on window \(wayland.pointerWindow?.id ?? 0)")
+            wayland.pointerX = wayland.pixels(x)
+            wayland.pointerY = wayland.pixels(y)
+            // A new enter: the compositor's cursor until it's set again.
+            wayland.enterSerial = serial
+            wayland.shownCursor = nil
+            wayland.updateCursor()
+        }
+        listener.pointee.leave = { data, _, _, _ in wayland(data)?.pointerWindow = nil }
+        listener.pointee.motion = { data, _, _, x, y in
+            guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
+            wayland.pointerX = wayland.pixels(x)
+            wayland.pointerY = wayland.pixels(y)
+            wayland.updateCursor()
+            wayland.bridge.pointerMoved(window, x: wayland.pointerX, y: wayland.pointerY)
+        }
+        listener.pointee.button = { data, _, serial, _, button, state in
+            guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
+            if state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue) {
+                wayland.pressSerial = serial
+                if button == 0x110, wayland.resizeFromEdge(window, x: wayland.pointerX, y: wayland.pointerY) { return }
+            }
+            // Linux's BTN_LEFT, BTN_RIGHT and BTN_MIDDLE.
+            let android: Int32
+            switch button {
+            case 0x110: android = ARTDisplay.Android.buttonPrimary
+            case 0x111: android = ARTDisplay.Android.buttonSecondary
+            case 0x112: android = ARTDisplay.Android.buttonTertiary
+            default: return
+            }
+            wayland.bridge.pointerButton(window, button: android,
+                                         down: state == UInt32(WL_POINTER_BUTTON_STATE_PRESSED.rawValue),
+                                         x: wayland.pointerX, y: wayland.pointerY)
+        }
+        listener.pointee.axis = { data, _, _, axis, value in
+            guard let wayland = wayland(data), let window = wayland.pointerWindow else { return }
+            // About 10 per wheel notch, down and right positive; Android's
+            // scroll is in notches, up and right positive.
+            let notches = Float(wl_fixed_to_double(value)) / 10
+            let vertical = axis == UInt32(WL_POINTER_AXIS_VERTICAL_SCROLL.rawValue)
+            wayland.bridge.pointerScrolled(window, x: wayland.pointerX, y: wayland.pointerY,
+                                           vertical: vertical ? -notches : 0, horizontal: vertical ? 0 : notches)
+        }
+        listener.pointee.frame = { _, _ in }
+        listener.pointee.axis_source = { _, _, _ in }
+        listener.pointee.axis_stop = { _, _, _, _ in }
+        listener.pointee.axis_discrete = { _, _, _, _ in }
+        listener.pointee.axis_value120 = { _, _, _, _ in }
+        listener.pointee.axis_relative_direction = { _, _, _, _ in }
         return listener
     }()
 
