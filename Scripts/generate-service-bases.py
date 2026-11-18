@@ -39,6 +39,7 @@ INTERFACES = [
     ("android.net.IConnectivityManager", "ConnectivityManagerBase"),
     ("android.os.IThermalService", "ThermalServiceBase"),
     ("android.os.IDeviceIdleController", "DeviceIdleControllerBase"),
+    ("android.accounts.IAccountManager", "AccountManagerBase"),
 ]
 
 # Plain interfaces and abstract classes, the base written for each, and

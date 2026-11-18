@@ -64,6 +64,8 @@ public final class MeadApp {
     private final String[] mSplitPaths;
     /** Who signed the APK, from its own signature; unknown for a dex. */
     final PackageParser.SigningDetails signingDetails;
+    /** The jars of the shared libraries its manifest uses that Mead has. */
+    private final String[] mSharedLibraryFiles;
 
     static volatile MeadApp sCurrent;
 
@@ -79,6 +81,7 @@ public final class MeadApp {
         requestedPermissions = Collections.emptyList();
         mSplitNames = mSplitPaths = new String[0];
         signingDetails = PackageParser.SigningDetails.UNKNOWN;
+        mSharedLibraryFiles = new String[0];
         mApplication = new ApplicationInfo();
         mApplication.packageName = packageName;
         mApplication.targetSdkVersion = 29;
@@ -117,6 +120,7 @@ public final class MeadApp {
             mSplitPaths[index] = splits.get(index).codePath;
         }
         signingDetails = signingDetails(parsed);
+        mSharedLibraryFiles = sharedLibraryFiles(parsed);
         mApplication = parsed.applicationInfo;
         // The application's meta-data, as GET_META_DATA gives it: Play
         // services' clients look for com.google.android.gms.version there.
@@ -152,6 +156,37 @@ public final class MeadApp {
         apks.add(sourcePath);
         Collections.addAll(apks, mSplitPaths);
         NativeLibraries.install(apks, new File(dataDir(), "lib"));
+    }
+
+    /**
+     * The jars of the shared libraries the manifest uses (<uses-library>),
+     * required or not, that Mead has, as the package manager gives them in
+     * ApplicationInfo.sharedLibraryFiles. They're where Android keeps them,
+     * beside the framework: <name>.jar with framework.jar, as
+     * /system/framework/org.apache.http.legacy.jar. A required one that's
+     * missing is logged; Android would refuse to install the app.
+     */
+    private static String[] sharedLibraryFiles(PackageParser.Package parsed) {
+        File framework = null;
+        String bootClassPath = System.getProperty("java.boot.class.path", "");
+        for (String entry : bootClassPath.split(":")) {
+            if (entry.endsWith("/framework.jar")) framework = new File(entry).getParentFile();
+        }
+        List<String> files = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        if (parsed.usesLibraries != null) names.addAll(parsed.usesLibraries);
+        int required = names.size();
+        if (parsed.usesOptionalLibraries != null) names.addAll(parsed.usesOptionalLibraries);
+        for (int index = 0; index < names.size(); index++) {
+            File jar = framework != null ? new File(framework, names.get(index) + ".jar") : null;
+            if (jar != null && jar.isFile()) {
+                if (!files.contains(jar.getPath())) files.add(jar.getPath());
+            } else if (index < required) {
+                android.util.Log.w("Mead", "Missing the shared library " + names.get(index) + " that "
+                        + parsed.packageName + " requires");
+            }
+        }
+        return files.toArray(new String[0]);
     }
 
     /**
@@ -312,6 +347,8 @@ public final class MeadApp {
             info.splitSourceDirs = mSplitPaths.clone();
             info.splitPublicSourceDirs = mSplitPaths.clone();
         }
+        // And the shared libraries it uses to its class path.
+        if (mSharedLibraryFiles.length > 0) info.sharedLibraryFiles = mSharedLibraryFiles.clone();
         info.dataDir = info.credentialProtectedDataDir = info.deviceProtectedDataDir = dataDir();
         info.nativeLibraryDir = info.dataDir + "/lib";
         info.uid = Process.myUid();

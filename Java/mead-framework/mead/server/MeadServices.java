@@ -73,6 +73,8 @@ public final class MeadServices {
         services.put(Context.DEVICE_IDLE_CONTROLLER, new DeviceIdleControllerService());
         services.put(Context.CLIPBOARD_SERVICE, new ClipboardService());
         services.put(Context.UI_MODE_SERVICE, new UiModeManagerService());
+        services.put(Context.ACCOUNT_SERVICE, new AccountManagerService());
+        services.put(Context.MEDIA_ROUTER_SERVICE, new MediaRouterService());
         services.put(Context.THERMAL_SERVICE, sThermal);
         for (Map.Entry<String, IBinder> service : services.entrySet()) {
             ServiceManager.addService(service.getKey(), service.getValue());

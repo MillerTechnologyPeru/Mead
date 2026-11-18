@@ -34,7 +34,7 @@ final class ConnectivityService extends ConnectivityManagerBase {
     private final AtomicInteger mNextRequestId = new AtomicInteger(1);
 
     /** The host's connection: its interface's name; null for none. */
-    private static String hostInterface() {
+    static String hostInterface() {
         String route = defaultRoute("/proc/net/route", 1, "00000000");
         return route != null ? route : defaultRoute("/proc/net/ipv6_route", 0, "00000000000000000000000000000000");
     }
