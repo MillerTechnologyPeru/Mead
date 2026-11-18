@@ -1,5 +1,6 @@
 package mead.server;
 
+import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.IBinder;
 import mead.server.base.WifiManagerBase;
@@ -14,6 +15,10 @@ final class WifiManagerService extends WifiManagerBase {
     private int mMulticastLocks;
 
     @Override public int getWifiEnabledState() { return WifiManager.WIFI_STATE_DISABLED; }
+
+    // Not connected, as Android's says with Wi-Fi off: a WifiInfo with no
+    // network (an unknown SSID, network ID -1), never null.
+    @Override public WifiInfo getConnectionInfo(String callingPackage) { return new WifiInfo(); }
 
     @Override public synchronized void acquireMulticastLock(IBinder binder, String tag) { mMulticastLocks++; }
 
