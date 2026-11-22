@@ -140,14 +140,18 @@ static void *mead_stub_for(const char *name) {
     }
     if (!unnamed)
         unnamed = make_thunk("an unresolved function"); // made before any pressure
-    void *thunk = make_thunk(name);
+    // The stub keeps its own copy of the name: it outlives an image that
+    // is released (one that failed to load after it was bound).
+    char *kept = strdup(name);
+    void *thunk = kept ? make_thunk(kept) : NULL;
     if (!thunk) {
         // Out of room for a name of its own: the shared one, which says
         // only "an unresolved function", rather than nothing at all.
+        free(kept);
         pthread_mutex_unlock(&lock);
         return unnamed;
     }
-    stub_entries[stub_count].name = name;
+    stub_entries[stub_count].name = kept;
     stub_entries[stub_count].thunk = thunk;
     stub_count++;
     pthread_mutex_unlock(&lock);
@@ -239,10 +243,22 @@ static const mead_image *tls_definition(const mead_image *image, size_t symbol_i
     mead_fatal("%s wants the thread-local %s, which nothing defines", image->path, name);
 }
 
+// Writes a relocated word. A relocation may name a word at any address (a
+// packed structure's pointer), so it isn't stored as an aligned one.
+static void store(uint8_t *target, uint64_t value) {
+    memcpy(target, &value, sizeof(value));
+}
+
 static void apply_one(void *context, uint64_t offset, uint32_t type, size_t symbol_index,
                       int64_t addend) {
     mead_image *image = context;
-    uint64_t *target = mead_image_address(image, offset);
+    // What a relocation names is in the image: the word it writes (two for
+    // a TLS descriptor), and its symbol.
+    uint8_t *target = mead_image_range(image, offset, type == R_AARCH64_TLSDESC ? 16 : 8);
+    if (!target)
+        mead_fatal("%s has a relocation outside its segments (at 0x%lx)", image->path, (unsigned long)offset);
+    if (symbol_index >= image->symbol_count)
+        mead_fatal("%s has a relocation against a symbol it doesn't have (%zu)", image->path, symbol_index);
     const char *name = symbol_index ? image->strings + image->symbols[symbol_index].st_name : NULL;
     uint64_t value = 0;
 
@@ -251,26 +267,26 @@ static void apply_one(void *context, uint64_t offset, uint32_t type, size_t symb
     case R_AARCH64_GLOB_DAT:
     case R_AARCH64_JUMP_SLOT: {
         if (!symbol_index) {
-            *target = (uint64_t)addend;
+            store(target, (uint64_t)addend);
             break;
         }
         bool answered = false;
         uint64_t address = resolve_for(image, symbol_index, name, &answered);
         if (answered)
-            *target = address + (uint64_t)addend;
+            store(target, address + (uint64_t)addend);
         else if (getenv("MEAD_STRICT"))
             mead_fatal("%s imports %s, which nothing answers (MEAD_STRICT)", image->path, name);
         else {
             void *stub = mead_stub_for(name);
             if (!stub)
                 mead_fatal("cannot make a stub for %s", name);
-            *target = (uint64_t)(uintptr_t)stub;
+            store(target, (uint64_t)(uintptr_t)stub);
         }
         break;
     }
 
     case R_AARCH64_RELATIVE:
-        *target = image->load_bias + (uint64_t)addend;
+        store(target, image->load_bias + (uint64_t)addend);
         break;
 
     case R_AARCH64_IRELATIVE:
@@ -278,18 +294,18 @@ static void apply_one(void *context, uint64_t offset, uint32_t type, size_t symb
                    image->path, (unsigned long)offset);
 
     case R_AARCH64_TLS_DTPMOD64:
-        *target = tls_definition(image, symbol_index, name, &value)->tls_module;
+        store(target, tls_definition(image, symbol_index, name, &value)->tls_module);
         break;
 
     case R_AARCH64_TLS_DTPREL64: {
         const mead_image *owner = tls_definition(image, symbol_index, name, &value);
-        *target = mead_tlv_dtprel(owner) + value + (uint64_t)addend;
+        store(target, mead_tlv_dtprel(owner) + value + (uint64_t)addend);
         break;
     }
 
     case R_AARCH64_TLS_TPREL64: {
         const mead_image *owner = tls_definition(image, symbol_index, name, &value);
-        *target = (uint64_t)mead_tlv_tprel(owner) + value + (uint64_t)addend;
+        store(target, (uint64_t)mead_tlv_tprel(owner) + value + (uint64_t)addend);
         break;
     }
 
@@ -297,8 +313,8 @@ static void apply_one(void *context, uint64_t offset, uint32_t type, size_t symb
         const mead_image *owner = tls_definition(image, symbol_index, name, &value);
         // The descriptor's halves: the resolver every descriptor here
         // shares, and the TP-relative offset it hands back.
-        target[0] = (uint64_t)(uintptr_t)mead_tlsdesc_resolve;
-        target[1] = (uint64_t)mead_tlv_tprel(owner) + value + (uint64_t)addend;
+        store(target, (uint64_t)(uintptr_t)mead_tlsdesc_resolve);
+        store(target + 8, (uint64_t)mead_tlv_tprel(owner) + value + (uint64_t)addend);
         break;
     }
 
@@ -306,6 +322,18 @@ static void apply_one(void *context, uint64_t offset, uint32_t type, size_t symb
         mead_fatal("%s has a relocation mead does not know (type %u at 0x%lx); please teach it",
                    image->path, type, (unsigned long)offset);
     }
+}
+
+// A relocation's addend when it is the word it relocates (RELR's), which
+// has to be in the image to be read.
+static int64_t word_at(const mead_image *image, uint64_t offset) {
+    const void *at = mead_image_range(image, offset, sizeof(int64_t));
+    if (!at)
+        mead_fatal("%s has a relative relocation outside its segments (at 0x%lx)", image->path,
+                   (unsigned long)offset);
+    int64_t word;
+    memcpy(&word, at, sizeof(word));
+    return word;
 }
 
 // A run of RELA relocations, or of the PLT's (DT_JMPREL), which are the
@@ -330,8 +358,7 @@ static void each_relr(const mead_image *image, const uint64_t *entries, size_t b
     for (size_t index = 0; index < count; index++) {
         uint64_t entry = entries[index];
         if (!(entry & 1)) {
-            visit(context, entry, R_AARCH64_RELATIVE, 0,
-                  *(int64_t *)mead_image_address(image, entry));
+            visit(context, entry, R_AARCH64_RELATIVE, 0, word_at(image, entry));
             next = entry + 8;
             continue;
         }
@@ -339,8 +366,7 @@ static void each_relr(const mead_image *image, const uint64_t *entries, size_t b
             if (!((entry >> bit) & 1))
                 continue;
             uint64_t offset = next + 8ull * (bit - 1);
-            visit(context, offset, R_AARCH64_RELATIVE, 0,
-                  *(int64_t *)mead_image_address(image, offset));
+            visit(context, offset, R_AARCH64_RELATIVE, 0, word_at(image, offset));
         }
         next += 63 * 8;
     }
@@ -383,6 +409,11 @@ static void each_packed(const mead_image *image, const uint8_t *packed, size_t b
         mead_fatal("%s has packed relocations without the APS2 magic", image->path);
     struct sleb128 reader = { image->path, packed + 4, packed + bytes };
     int64_t remaining = sleb128(&reader);
+    // A group can hold relocations that take no bytes (a run with one
+    // delta and one r_info), so the table's size doesn't bound their
+    // count; the image's does, at one for each word it has.
+    if (remaining < 0 || (uint64_t)remaining > image->mapping_size / 8)
+        mead_fatal("%s has more packed relocations than words (%ld)", image->path, (long)remaining);
     uint64_t offset = (uint64_t)sleb128(&reader);
     uint64_t info = 0;
     int64_t addend = 0;
@@ -413,15 +444,20 @@ static void each_packed(const mead_image *image, const uint8_t *packed, size_t b
 }
 
 // A table the dynamic section names, with its size in *bytes; NULL if the
-// image has none.
+// image has none, or an empty one. All of it is in the image.
 static const void *dynamic_table(const mead_image *image, uint64_t tag, uint64_t size_tag,
-                                 size_t *bytes) {
+                                 size_t *bytes, uint64_t alignment) {
     const Elf64_Dyn *entry = mead_image_dynamic(image, tag);
     const Elf64_Dyn *size = mead_image_dynamic(image, size_tag);
-    if (!entry || !size)
+    if (!entry || !size || size->d_un.d_val == 0)
         return NULL;
+    const void *table = (uint64_t)entry->d_un.d_ptr % alignment == 0
+        ? mead_image_range(image, (uint64_t)entry->d_un.d_ptr, size->d_un.d_val) : NULL;
+    if (!table)
+        mead_fatal("%s has a relocation table outside its segments or misaligned (tag 0x%lx)", image->path,
+                   (unsigned long)tag);
     *bytes = (size_t)size->d_un.d_val;
-    return mead_image_address(image, (uint64_t)entry->d_un.d_ptr);
+    return table;
 }
 
 void mead_fixups_each(const mead_image *image, mead_fixup_fn visit, void *context) {
@@ -429,14 +465,14 @@ void mead_fixups_each(const mead_image *image, mead_fixup_fn visit, void *contex
         mead_fatal("%s has REL relocations, which arm64 does not make", image->path);
     const void *table;
     size_t bytes = 0;
-    if ((table = dynamic_table(image, DT_ANDROID_RELA, DT_ANDROID_RELASZ, &bytes)))
+    if ((table = dynamic_table(image, DT_ANDROID_RELA, DT_ANDROID_RELASZ, &bytes, 1)))
         each_packed(image, table, bytes, visit, context);
-    if ((table = dynamic_table(image, DT_RELR, DT_RELRSZ, &bytes)) ||
-        (table = dynamic_table(image, DT_ANDROID_RELR, DT_ANDROID_RELRSZ, &bytes)))
+    if ((table = dynamic_table(image, DT_RELR, DT_RELRSZ, &bytes, 8)) ||
+        (table = dynamic_table(image, DT_ANDROID_RELR, DT_ANDROID_RELRSZ, &bytes, 8)))
         each_relr(image, table, bytes, visit, context);
-    if ((table = dynamic_table(image, DT_RELA, DT_RELASZ, &bytes)))
+    if ((table = dynamic_table(image, DT_RELA, DT_RELASZ, &bytes, 8)))
         each_rela(table, bytes, visit, context);
-    if ((table = dynamic_table(image, DT_JMPREL, DT_PLTRELSZ, &bytes)))
+    if ((table = dynamic_table(image, DT_JMPREL, DT_PLTRELSZ, &bytes, 8)))
         each_rela(table, bytes, visit, context);
 }
 
