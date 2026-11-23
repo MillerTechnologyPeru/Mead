@@ -312,8 +312,9 @@ mead_image *mead_deps_add(const char *path, char **error) {
     }
     mead_tlv_add(image);
     const Elf64_Dyn *soname = mead_image_dynamic(image, DT_SONAME);
-    if (soname && image->strings)
-        image->soname = strdup(image->strings + soname->d_un.d_val);
+    const char *own_name = soname ? mead_image_string(image, soname->d_un.d_val) : NULL;
+    if (own_name)
+        image->soname = strdup(own_name);
     if ((already = find_loaded(image->soname ? image->soname : path))) {
         mead_image_destroy(image);
         pthread_mutex_unlock(&lock);
@@ -361,7 +362,9 @@ mead_image *mead_deps_add(const char *path, char **error) {
     for (const Elf64_Dyn *entry = image->dynamic; entry->d_tag != DT_NULL; entry++) {
         if (entry->d_tag != DT_NEEDED)
             continue;
-        const char *name = image->strings + entry->d_un.d_val;
+        const char *name = mead_image_string(image, entry->d_un.d_val);
+        if (!name)
+            continue; // named past its strings: nothing to look for
         char file[4096];
         snprintf(file, sizeof(file), "%s/%s", game_dir ? game_dir : ".", name);
         mead_image *dependency = NULL;

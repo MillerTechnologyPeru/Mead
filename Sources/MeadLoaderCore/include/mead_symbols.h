@@ -9,8 +9,10 @@
 
 #include <stdbool.h>
 
-// Reads DT_SYMTAB, DT_STRTAB, DT_HASH and DT_GNU_HASH into `image`. True,
-// or false with *error (malloc'd, free it) for a table past its strings.
+// Reads DT_SYMTAB, DT_STRTAB, DT_HASH and DT_GNU_HASH into `image`, checking
+// that each table is inside the image and consistent enough to be walked:
+// every symbol's name is in the string table, and a hash chain ends. True,
+// or false with *error (malloc'd, free it) saying what isn't.
 bool mead_symbols_setup(mead_image *image, char **error);
 
 // The symbol a name names in `image`, or NULL. Versioned symbols are not

@@ -35,7 +35,10 @@ typedef struct mead_image {
     uint16_t phnum, phentsize;
     uint64_t load_bias;         // added to the image's vaddrs
     uint64_t alignment;         // the strictest LOAD segment's p_align
-    const Elf64_Dyn *dynamic;   // in the mapped image; NULL when there is none
+    void *mapping;              // where its segments' span is mapped
+    size_t mapping_size;        // and how much of it there is
+    const Elf64_Dyn *dynamic;   // in the mapped image, ending in a DT_NULL
+                                // inside its segment; NULL when there is none
 
     // mead_deps fills these:
     struct mead_image **needed; // the DT_NEEDED images, in order; owned
@@ -47,8 +50,10 @@ typedef struct mead_image {
     // mead_symbols_setup fills these:
     const Elf64_Sym *symbols;   // DT_SYMTAB; index 0 is the null symbol
     size_t symbol_count;        // including the null symbol
-    const char *strings;        // DT_STRTAB
+    const char *strings;        // DT_STRTAB, which ends in a NUL
+    size_t strings_size;        // DT_STRSZ
     const uint32_t *gnu_hash;   // DT_GNU_HASH
+    size_t gnu_chain_count;     // how many chain words its segment holds
     const uint32_t *hash;       // DT_HASH
 
     // mead_tlv fills these for an image with a PT_TLS segment:
@@ -61,12 +66,29 @@ typedef struct mead_image {
 
 // Reads and validates `path`, maps its segments writable (relocations come
 // next) and fills the image out. Returns NULL with *error (malloc'd, free
-// it) saying why.
+// it) saying why. A library is a file from an APK, which may be truncated
+// or malformed: its headers are checked against the file and each other
+// here, and what they point at in the image is reached through
+// mead_image_range from then on.
 mead_image *mead_image_open(const char *path, char **error);
 
-// Releases an image nothing took a liking to. Images the registry adopted
-// are never released; the loader's images live as long as the process.
+// Releases an image nothing took a liking to, and its mapping. Images the
+// registry adopted are never released; the loader's images live as long as
+// the process.
 void mead_image_destroy(mead_image *image);
+
+// The `size` bytes at `vaddr`, if they lie whole inside one LOAD segment's
+// memory; NULL if they don't, or the image isn't mapped. What a library's
+// tables say about where things are goes through here before it is read
+// or written.
+void *mead_image_range(const mead_image *image, uint64_t vaddr, uint64_t size);
+
+// How many bytes of its LOAD segment's memory follow `vaddr`; 0 outside
+// every segment.
+uint64_t mead_image_room(const mead_image *image, uint64_t vaddr);
+
+// The string at an offset in the string table, or NULL past its end.
+const char *mead_image_string(const mead_image *image, uint64_t offset);
 
 // The address a vaddr maps to: load_bias + vaddr.
 static inline void *mead_image_address(const mead_image *image, uint64_t vaddr) {

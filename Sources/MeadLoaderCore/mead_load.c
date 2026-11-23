@@ -129,7 +129,9 @@ static void run_initializers(mead_image *image) {
     const Elf64_Dyn *array = mead_image_dynamic(image, DT_INIT_ARRAY);
     const Elf64_Dyn *size = mead_image_dynamic(image, DT_INIT_ARRAYSZ);
     if (array && size) {
-        uint64_t *addresses = mead_image_address(image, (uint64_t)array->d_un.d_ptr);
+        uint64_t *addresses = mead_image_range(image, (uint64_t)array->d_un.d_ptr, size->d_un.d_val);
+        if (!addresses && size->d_un.d_val > 0)
+            mead_fatal("%s has initializers outside its segments", image->path);
         size_t count = (size_t)size->d_un.d_val / sizeof(*addresses);
         for (size_t index = 0; index < count; index++) {
             mead_trace("init", "running %s's initializer %zu", image->path, index);
